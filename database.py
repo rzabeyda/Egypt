@@ -55,13 +55,10 @@ def init_db():
             )
         """)
         conn.commit()
-
-    # ✅ Автомиграция — добавляем колонки если их нет (не ломает старую БД)
     _migrate()
 
 
 def _migrate():
-    """Добавляет новые колонки в существующую БД если их ещё нет."""
     migrations = [
         ("user_settings", "days_filter",  "INTEGER DEFAULT 180"),
         ("user_settings", "interval_min", "INTEGER DEFAULT 30"),
@@ -77,13 +74,16 @@ def _migrate():
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
                 conn.commit()
             except Exception:
-                pass  # колонка уже существует — игнорируем
+                pass
 
 
 # ── Хэш тура ─────────────────────────────────────────────────
+# Хэш включает дату вылета — один и тот же тур не шлётся дважды
+# в одну проверку, но при следующей проверке шлётся снова
+# (sent_tours очищается каждые 24 часа через cleanup_old_sent)
 
 def tour_hash(tour: dict) -> str:
-    key = f"{tour['operator']}|{tour['hotel']}|{tour['price']}|{tour.get('departure_date','')}"
+    key = f"{tour['operator']}|{tour['hotel']}|{tour.get('departure_date','')}"
     return hashlib.md5(key.encode()).hexdigest()
 
 
@@ -97,9 +97,9 @@ def is_sent(tour: dict) -> bool:
 def mark_sent(tour: dict):
     with get_conn() as conn:
         conn.execute("""
-            INSERT OR IGNORE INTO sent_tours
-              (hash,operator,hotel,destination,price,nights,departure,url)
-            VALUES (?,?,?,?,?,?,?,?)
+            INSERT OR REPLACE INTO sent_tours
+              (hash,operator,hotel,destination,price,nights,departure,url,sent_at)
+            VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
         """, (
             tour_hash(tour),
             tour.get("operator",""), tour.get("hotel",""),
@@ -108,6 +108,18 @@ def mark_sent(tour: dict):
             tour.get("url",""),
         ))
         conn.commit()
+
+
+def cleanup_old_sent(hours: int = 0):  # 0 = чистить при каждой проверке (режим разработки)
+    """Удаляет записи старше N часов — чтобы туры снова присылались."""
+    with get_conn() as conn:
+        conn.execute("""
+            DELETE FROM sent_tours
+            WHERE sent_at < datetime('now', ? || ' hours')
+        """, (f"-{hours}",))
+        deleted = conn.execute("SELECT changes()").fetchone()[0]
+        conn.commit()
+    return deleted
 
 
 # ── Цены ─────────────────────────────────────────────────────

@@ -1,8 +1,10 @@
+import os
+
 # ============================================================
 #  EGYPT TOUR BOT — CONFIG
 # ============================================================
 
-TELEGRAM_TOKEN = "8611683567:AAFcLxkFz7jJSkr7jhzas3Y1KHZI8CN8W8g"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 
 # Заполни после первого /myid
 ALLOWED_USERS = []   # пример: [123456789]

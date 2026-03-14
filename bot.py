@@ -22,7 +22,7 @@ import config
 from database import (
     init_db, add_user, remove_user, get_active_users,
     is_sent, mark_sent, get_recent_tours,
-    get_settings, set_setting,
+    get_settings, set_setting, cleanup_old_sent,
 )
 from filters import passes_filters
 from formatter import format_tour, fmt_start, fmt_status, fmt_settings
@@ -179,10 +179,10 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         fmt_start(), parse_mode="HTML", reply_markup=main_keyboard(chat_id)
     )
-    await update.message.reply_text("🔍 Ищу горящие туры, подождите...")
-    found = await run_check(notify_users=False)
+    await update.message.reply_text("🤖 Ищу предложения.. ожидайте!")
+    all_tours = await fetch_all_tours()
     s = get_settings(chat_id)
-    user_tours = [t for t in found if passes_filters(t, s)]
+    user_tours = [t for t in all_tours if passes_filters(t, s)]
     if user_tours:
         for tour in user_tours[:5]:
             await _send_tour(ctx.bot, chat_id, tour)
@@ -251,7 +251,7 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
     elif text == "🔍 Проверить":
-        await update.message.reply_text("🔍 Проверяю...")
+        await update.message.reply_text("🤖 Ищу предложения.. ожидайте!")
         all_tours = await fetch_all_tours()
         s = get_settings(chat_id)
         user_tours = [t for t in all_tours if passes_filters(t, s)]
@@ -259,7 +259,7 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             for tour in user_tours[:5]:
                 await _send_tour(ctx.bot, chat_id, tour)
         else:
-            await update.message.reply_text("😕 Горящих туров по вашим фильтрам сейчас нет.")
+            await update.message.reply_text("😕 Туров по вашим фильтрам сейчас нет.")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -330,7 +330,6 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ── Интервал ─────────────────────────────────────────────
     if data.startswith("interval_"):
         minutes = int(data.split("_")[1])
         set_setting(chat_id, "interval_min", minutes)
@@ -343,7 +342,6 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _back_settings(query, chat_id, f"✅ Частота: {label}")
         return
 
-    # ── Город ────────────────────────────────────────────────
     if data.startswith("city_"):
         val = data[5:]
         set_setting(chat_id, "city_filter", val)
@@ -351,14 +349,12 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _back_settings(query, chat_id, f"✅ Город: {labels.get(val, val)}")
         return
 
-    # ── Дни ──────────────────────────────────────────────────
     if data.startswith("days_"):
         val = int(data.split("_")[1])
         set_setting(chat_id, "days_filter", val)
         await _back_settings(query, chat_id, f"✅ Вылет в ближайшие: {val} дней")
         return
 
-    # ── Цена ─────────────────────────────────────────────────
     if data.startswith("price_"):
         val = int(data.split("_")[1])
         set_setting(chat_id, "price_max", val)
@@ -366,7 +362,6 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _back_settings(query, chat_id, f"✅ Макс. цена: {label}")
         return
 
-    # ── Звёзды ───────────────────────────────────────────────
     if data.startswith("stars_"):
         parts = data.split("_")
         mn, mx = int(parts[1]), int(parts[2])
@@ -375,7 +370,6 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _back_settings(query, chat_id, f"✅ Звёзды: {mn}★ — {mx}★")
         return
 
-    # ── Питание ──────────────────────────────────────────────
     if data.startswith("meal_"):
         val = data[5:]
         set_setting(chat_id, "meal_filter", val)
@@ -418,20 +412,19 @@ async def _send_tour(bot, chat_id: int, tour: dict):
 
 
 # ══════════════════════════════════════════════════════════════
-#  ПРОВЕРКА ТУРОВ
+#  СКРАПЕРЫ
 # ══════════════════════════════════════════════════════════════
 
 SCRAPERS = [
-    ("Novatours",    fetch_novatours),
-    # ("TEZ Tour",     fetch_teztour),
+    ("Novatours", fetch_novatours),
+    ("TEZ Tour",  fetch_teztour),
     # ("Coral Travel", fetch_coral),
     # ("Join Up",      fetch_joinup),
 ]
 
 
-
 async def fetch_all_tours() -> list:
-    """Получает все актуальные туры без фильтра is_sent — для кнопки Проверить."""
+    """Все туры без фильтра is_sent — для кнопки Проверить и /start."""
     loop = asyncio.get_event_loop()
     results = await asyncio.gather(
         *[loop.run_in_executor(None, fn) for _, fn in SCRAPERS],
@@ -447,9 +440,19 @@ async def fetch_all_tours() -> list:
 
 
 async def run_check(app=None, notify_users=True) -> list:
+    """
+    Периодическая проверка (по расписанию).
+    Сначала чистим старые записи is_sent — чтобы туры присылались повторно.
+    Потом шлём всё что проходит фильтры и ещё не было в этой сессии.
+    """
     global last_check_time, total_sent
     last_check_time = datetime.now().strftime("%d.%m.%Y %H:%M")
     logger.info(f"▶️  Проверка [{last_check_time}]")
+
+    # Чистим записи старше 24 часов — туры будут присылаться снова
+    deleted = cleanup_old_sent(hours=0)  # DEV: чистить при каждой проверке
+    if deleted:
+        logger.info(f"🗑 Очищено старых записей: {deleted}")
 
     loop = asyncio.get_event_loop()
     results = await asyncio.gather(
@@ -473,7 +476,7 @@ async def run_check(app=None, notify_users=True) -> list:
             mark_sent(tour)
             new_tours.append(tour)
 
-    logger.info(f"🔥 Новых горящих: {len(new_tours)}")
+    logger.info(f"✅ Новых предложений: {len(new_tours)}")
 
     if new_tours and notify_users and app:
         total_sent += len(new_tours)
@@ -528,7 +531,8 @@ def main():
         for cid in get_active_users():
             try:
                 await app.bot.send_message(
-                    cid, "🤖 Бот запущен!", reply_markup=main_keyboard(cid)
+                    cid, "🤖 Бот запущен! Ищу предложения..",
+                    reply_markup=main_keyboard(cid)
                 )
             except Exception:
                 pass
@@ -541,6 +545,16 @@ def main():
     app.post_shutdown = on_shutdown
 
     logger.info("🤖 Бот запущен!")
+
+    # На Python 3.12+ get_event_loop() больше не создаёт цикл автоматически,
+    # а внутри python-telegram-bot он всё ещё используется.
+    # Явно создаём и устанавливаем event loop, чтобы run_polling работал стабильно.
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    except Exception:
+        pass
+
     app.run_polling(drop_pending_updates=False)
 
 

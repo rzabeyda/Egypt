@@ -16,10 +16,18 @@ import re as _re
 
 
 def _get_token() -> str:
+    """
+    Получаем Bearer‑токен Novatours.
+
+    Если Playwright недоступен (нет зависимости / нет браузера),
+    сразу используем запасной токен из кода — так парсер продолжит работать
+    даже на «облегчённых» окружениях без дополнительных инструментов.
+    """
     if _token_cache["token"]:
         return _token_cache["token"]
+
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import sync_playwright  # может не установиться в минимальной среде
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
             page = browser.new_context(
