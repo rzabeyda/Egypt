@@ -1,0 +1,24 @@
+import requests, json
+
+TOKEN = "03096e21141074517f6c058f9052cbfe"
+BASE = "https://pim.novatours.eu/webservice/nova/et_ru"
+HEADERS = {
+    "Authorization": f"Bearer {TOKEN}",
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://www.novatours.ee/",
+}
+s = requests.Session()
+s.headers.update(HEADERS)
+
+r = s.get(f"{BASE}/list-hotels", params={
+    "country_code[]": "EG",
+    "departure_code": "TLL",
+    "adults": 2, "childs": 0,
+    "nights_from": 7, "nights_to": 14,
+    "sort": "price_asc", "items_per_page": 5,
+}, timeout=20)
+
+hotels = r.json().get("hotels", [])
+print(f"Первый отель — все поля:\n")
+if hotels:
+    print(json.dumps(hotels[0], ensure_ascii=False, indent=2))

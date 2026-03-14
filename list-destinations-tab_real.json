@@ -1,0 +1,152 @@
+{
+  "url": "https://pim.novatours.eu/webservice/nova/et_ru/list-destinations-tab?is_group=true",
+  "headers": {
+    "sec-ch-ua-platform": "\"Windows\"",
+    "authorization": "Bearer 03096e21141074517f6c058f9052cbfe",
+    "referer": "https://www.novatours.ee/",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+    "accept-language": "ru-RU",
+    "sec-ch-ua-mobile": "?0"
+  },
+  "data": {
+    "destinations_tab": {
+      "Европа": {
+        "BG": [
+          {
+            "country_name": "Болгария",
+            "city_code": "BOJ",
+            "city_name": "Бургас"
+          }
+        ],
+        "CY": [
+          {
+            "country_name": "Кипр",
+            "city_code": "LCA",
+            "city_name": "Ларнака"
+          }
+        ],
+        "ES": [
+          {
+            "country_name": "Испания",
+            "city_code": "AGP",
+            "city_name": "Малага"
+          },
+          {
+            "country_name": "Испания",
+            "city_code": "BCN",
+            "city_name": "Барселона"
+          },
+          {
+            "country_name": "Испания",
+            "city_code": "PMI",
+            "city_name": "Майорка"
+          }
+        ],
+        "GR": [
+          {
+            "country_name": "Греция",
+            "city_code": "CFU",
+            "city_name": "Корфу"
+          },
+          {
+            "country_name": "Греция",
+            "city_code": "HER",
+            "city_name": "Крит"
+          }
+        ],
+        "IT": [
+          {
+            "country_name": "Италия",
+            "city_code": "SUF",
+            "city_name": "Ламеция"
+          }
+        ],
+        "ME": [
+          {
+            "country_name": "Черногория",
+            "city_code": "TIV",
+            "city_name": "Тиват"
+          }
+        ]
+      },
+      "Африка": {
+        "CN": [
+          {
+            "country_name": "Канарские острова (Испания)",
+            "city_code": "TFS",
+            "city_name": "Тенерифе"
+          }
+        ],
+        "EG": [
+          {
+            "country_name": "Египет",
+            "city_code": "HRG",
+            "city_name": "Хургада"
+          },
+          {
+            "country_name": "Египет",
+            "city_code": "SSH",
+            "city_name": "Шарм Эль Шейх"
+          }
+        ],
+        "MU": [
+          {
+            "country_name": "Маврикий",
+            "city_code": "MRU",
+            "city_name": "Маврикий"
+          }
+        ],
+        "TN": [
+          {
+            "country_name": "Тунис",
+            "city_code": "NBE",
+            "city_name": "Энфида"
+          }
+        ],
+        "TZ": [
+          {
+            "country_name": "Танзания",
+            "city_code": "ZNZ",
+            "city_name": "Занзибар"
+          }
+        ]
+      },
+      "Азия": {
+        "LK": [
+          {
+            "country_name": "Шри Ланка",
+            "city_code": "CMB",
+            "city_name": "Коломбо"
+          }
+        ],
+        "TH": [
+          {
+            "country_name": "Тайланд",
+            "city_code": "BKK",
+            "city_name": "Бангкок"
+          },
+          {
+            "country_name": "Тайланд",
+            "city_code": "HKT",
+            "city_name": "Пхукет"
+          }
+        ],
+        "TR": [
+          {
+            "country_name": "Турция",
+            "city_code": "AYT",
+            "city_name": "Анталия"
+          }
+        ],
+        "VN": [
+          {
+            "country_name": "Вьетнам",
+            "city_code": "SGN",
+            "city_name": "Хошимин"
+          }
+        ]
+      }
+    }
+  }
+}

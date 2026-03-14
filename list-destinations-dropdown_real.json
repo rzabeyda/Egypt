@@ -1,0 +1,186 @@
+{
+  "url": "https://pim.novatours.eu/webservice/nova/et_ru/list-destinations-dropdown?add_countries_images=true&adults=2&childs=0&travel_type%5B0%5D=beach",
+  "headers": {
+    "sec-ch-ua-platform": "\"Windows\"",
+    "authorization": "Bearer 03096e21141074517f6c058f9052cbfe",
+    "referer": "https://www.novatours.ee/",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+    "accept-language": "ru-RU",
+    "sec-ch-ua-mobile": "?0"
+  },
+  "data": {
+    "destinations_dropdown": [
+      {
+        "country_code": "BG",
+        "country_name": "Болгария",
+        "cities": {
+          "BOJ": {
+            "city_code": "BOJ",
+            "city_name": "Бургас"
+          }
+        }
+      },
+      {
+        "country_code": "VN",
+        "country_name": "Вьетнам",
+        "cities": {
+          "SGN": {
+            "city_code": "SGN",
+            "city_name": "Хошимин"
+          }
+        }
+      },
+      {
+        "country_code": "GR",
+        "country_name": "Греция",
+        "cities": {
+          "CFU": {
+            "city_code": "CFU",
+            "city_name": "Корфу"
+          },
+          "HER": {
+            "city_code": "HER",
+            "city_name": "Крит"
+          }
+        }
+      },
+      {
+        "country_code": "EG",
+        "country_name": "Египет",
+        "cities": {
+          "HRG": {
+            "city_code": "HRG",
+            "city_name": "Хургада"
+          },
+          "SSH": {
+            "city_code": "SSH",
+            "city_name": "Шарм Эль Шейх"
+          }
+        }
+      },
+      {
+        "country_code": "ES",
+        "country_name": "Испания",
+        "cities": {
+          "AGP": {
+            "city_code": "AGP",
+            "city_name": "Малага"
+          },
+          "BCN": {
+            "city_code": "BCN",
+            "city_name": "Барселона"
+          },
+          "PMI": {
+            "city_code": "PMI",
+            "city_name": "Майорка"
+          }
+        }
+      },
+      {
+        "country_code": "IT",
+        "country_name": "Италия",
+        "cities": {
+          "SUF": {
+            "city_code": "SUF",
+            "city_name": "Ламеция"
+          }
+        }
+      },
+      {
+        "country_code": "CN",
+        "country_name": "Канарские острова (Испания)",
+        "cities": {
+          "TFS": {
+            "city_code": "TFS",
+            "city_name": "Тенерифе"
+          }
+        }
+      },
+      {
+        "country_code": "CY",
+        "country_name": "Кипр",
+        "cities": {
+          "LCA": {
+            "city_code": "LCA",
+            "city_name": "Ларнака"
+          }
+        }
+      },
+      {
+        "country_code": "MU",
+        "country_name": "Маврикий",
+        "cities": {
+          "MRU": {
+            "city_code": "MRU",
+            "city_name": "Маврикий"
+          }
+        }
+      },
+      {
+        "country_code": "TH",
+        "country_name": "Тайланд",
+        "cities": {
+          "BKK": {
+            "city_code": "BKK",
+            "city_name": "Бангкок"
+          },
+          "HKT": {
+            "city_code": "HKT",
+            "city_name": "Пхукет"
+          }
+        }
+      },
+      {
+        "country_code": "TZ",
+        "country_name": "Танзания",
+        "cities": {
+          "ZNZ": {
+            "city_code": "ZNZ",
+            "city_name": "Занзибар"
+          }
+        }
+      },
+      {
+        "country_code": "TN",
+        "country_name": "Тунис",
+        "cities": {
+          "NBE": {
+            "city_code": "NBE",
+            "city_name": "Энфида"
+          }
+        }
+      },
+      {
+        "country_code": "TR",
+        "country_name": "Турция",
+        "cities": {
+          "AYT": {
+            "city_code": "AYT",
+            "city_name": "Анталия"
+          }
+        }
+      },
+      {
+        "country_code": "ME",
+        "country_name": "Черногория",
+        "cities": {
+          "TIV": {
+            "city_code": "TIV",
+            "city_name": "Тиват"
+          }
+        }
+      },
+      {
+        "country_code": "LK",
+        "country_name": "Шри Ланка",
+        "cities": {
+          "CMB": {
+            "city_code": "CMB",
+            "city_name": "Коломбо"
+          }
+        }
+      }
+    ]
+  }
+}
