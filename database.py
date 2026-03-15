@@ -45,13 +45,13 @@ def init_db():
         conn.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
                 chat_id      INTEGER PRIMARY KEY,
-                interval_min INTEGER DEFAULT 30,
-                meal_filter  TEXT    DEFAULT 'any',
-                stars_min    INTEGER DEFAULT 3,
+                interval_min INTEGER DEFAULT 60,
+                meal_filter  TEXT    DEFAULT 'ai,uai',
+                stars_min    INTEGER DEFAULT 4,
                 stars_max    INTEGER DEFAULT 5,
                 city_filter  TEXT    DEFAULT 'all',
-                price_max    INTEGER DEFAULT 9999,
-                days_filter  INTEGER DEFAULT 180
+                price_max    INTEGER DEFAULT 400,
+                days_filter  INTEGER DEFAULT 7
             )
         """)
         conn.commit()
@@ -60,13 +60,13 @@ def init_db():
 
 def _migrate():
     migrations = [
-        ("user_settings", "days_filter",  "INTEGER DEFAULT 180"),
-        ("user_settings", "interval_min", "INTEGER DEFAULT 30"),
-        ("user_settings", "meal_filter",  "TEXT DEFAULT 'any'"),
-        ("user_settings", "stars_min",    "INTEGER DEFAULT 3"),
+        ("user_settings", "days_filter",  "INTEGER DEFAULT 7"),
+        ("user_settings", "interval_min", "INTEGER DEFAULT 60"),
+        ("user_settings", "meal_filter",  "TEXT DEFAULT 'ai,uai'"),
+        ("user_settings", "stars_min",    "INTEGER DEFAULT 4"),
         ("user_settings", "stars_max",    "INTEGER DEFAULT 5"),
         ("user_settings", "city_filter",  "TEXT DEFAULT 'all'"),
-        ("user_settings", "price_max",    "INTEGER DEFAULT 9999"),
+        ("user_settings", "price_max",    "INTEGER DEFAULT 400"),
     ]
     with get_conn() as conn:
         for table, col, definition in migrations:

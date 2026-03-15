@@ -21,12 +21,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import config
 from database import (
     init_db, add_user, remove_user, get_active_users,
-    is_sent, mark_sent, get_recent_tours,
-    get_settings, set_setting, cleanup_old_sent,
+    get_recent_tours,
+    get_settings, set_setting,
 )
 from filters import passes_filters
 from formatter import format_tour, fmt_start, fmt_status, fmt_settings
 from scrapers import fetch_novatours, fetch_teztour, fetch_coral, fetch_joinup
+from scrapers.delfiin import fetch_delfiin
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,7 +52,7 @@ def main_keyboard(chat_id: int) -> ReplyKeyboardMarkup:
     toggle_label = "🔕 Выключить" if active else "🔔 Включить"
     return ReplyKeyboardMarkup(
         [[
-            KeyboardButton("🔍 Проверить"),
+            KeyboardButton("🔍 Искать туры"),
             KeyboardButton("⚙️ Фильтры"),
             KeyboardButton(toggle_label),
         ]],
@@ -179,12 +180,20 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         fmt_start(), parse_mode="HTML", reply_markup=main_keyboard(chat_id)
     )
+    s = get_settings(chat_id)
+    s["chat_id"] = chat_id
+    await update.message.reply_text(
+    await update.message.reply_text(
+        "⚙️ <b>Ваши фильтры по умолчанию:</b>\n\n" + fmt_settings(s),
+        parse_mode="HTML"
+    )
+    )
     await update.message.reply_text("🤖 Ищу предложения.. ожидайте!")
     all_tours = await fetch_all_tours()
     s = get_settings(chat_id)
     user_tours = [t for t in all_tours if passes_filters(t, s)]
     if user_tours:
-        for tour in user_tours[:5]:
+        for tour in user_tours:
             await _send_tour(ctx.bot, chat_id, tour)
     else:
         await update.message.reply_text(
@@ -202,7 +211,7 @@ async def cmd_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        fmt_status(len(get_active_users()), last_check_time, total_sent),
+        fmt_status(len(get_active_users()), last_check_time, total_sent, config.CHECK_INTERVAL_MINUTES),
         parse_mode="HTML",
     )
 
@@ -250,13 +259,13 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "🔕 Рассылка выключена.", reply_markup=main_keyboard(chat_id)
         )
 
-    elif text == "🔍 Проверить":
+    elif text == "🔍 Искать туры":
         await update.message.reply_text("🤖 Ищу предложения.. ожидайте!")
         all_tours = await fetch_all_tours()
         s = get_settings(chat_id)
         user_tours = [t for t in all_tours if passes_filters(t, s)]
         if user_tours:
-            for tour in user_tours[:5]:
+            for tour in user_tours:
                 await _send_tour(ctx.bot, chat_id, tour)
         else:
             await update.message.reply_text("😕 Туров по вашим фильтрам сейчас нет.")
@@ -418,13 +427,14 @@ async def _send_tour(bot, chat_id: int, tour: dict):
 SCRAPERS = [
     ("Novatours", fetch_novatours),
     ("TEZ Tour",  fetch_teztour),
+    ("Delfiin",   fetch_delfiin),
     # ("Coral Travel", fetch_coral),
     # ("Join Up",      fetch_joinup),
 ]
 
 
 async def fetch_all_tours() -> list:
-    """Все туры без фильтра is_sent — для кнопки Проверить и /start."""
+    """Все туры для кнопки Проверить и /start."""
     loop = asyncio.get_event_loop()
     results = await asyncio.gather(
         *[loop.run_in_executor(None, fn) for _, fn in SCRAPERS],
@@ -442,17 +452,11 @@ async def fetch_all_tours() -> list:
 async def run_check(app=None, notify_users=True) -> list:
     """
     Периодическая проверка (по расписанию).
-    Сначала чистим старые записи is_sent — чтобы туры присылались повторно.
-    Потом шлём всё что проходит фильтры и ещё не было в этой сессии.
+    Шлём всё что проходит глобальные фильтры.
     """
     global last_check_time, total_sent
     last_check_time = datetime.now().strftime("%d.%m.%Y %H:%M")
     logger.info(f"▶️  Проверка [{last_check_time}]")
-
-    # Чистим записи старше 24 часов — туры будут присылаться снова
-    deleted = cleanup_old_sent(hours=0)  # DEV: чистить при каждой проверке
-    if deleted:
-        logger.info(f"🗑 Очищено старых записей: {deleted}")
 
     loop = asyncio.get_event_loop()
     results = await asyncio.gather(
@@ -470,25 +474,40 @@ async def run_check(app=None, notify_users=True) -> list:
 
     logger.info(f"Итого до фильтра: {len(all_tours)}")
 
-    new_tours = []
-    for tour in all_tours:
-        if passes_filters(tour) and not is_sent(tour):
-            mark_sent(tour)
-            new_tours.append(tour)
+    new_tours = [t for t in all_tours if passes_filters(t)]
 
     logger.info(f"✅ Новых предложений: {len(new_tours)}")
 
-    if new_tours and notify_users and app:
-        total_sent += len(new_tours)
+    if notify_users and app:
         for chat_id in get_active_users():
             s = get_settings(chat_id)
-            user_tours = [t for t in new_tours if passes_filters(t, s)]
-            for tour in user_tours[:5]:
+            user_tours = [t for t in new_tours if passes_filters(t, s)] if new_tours else []
+            if user_tours:
+                total_sent += len(user_tours)
+                for tour in user_tours:
+                    try:
+                        await _send_tour(app.bot, chat_id, tour)
+                        await asyncio.sleep(0.05)
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки {chat_id}: {e}")
                 try:
-                    await _send_tour(app.bot, chat_id, tour)
-                    await asyncio.sleep(0.05)
-                except Exception as e:
-                    logger.error(f"Ошибка отправки {chat_id}: {e}")
+                    await app.bot.send_message(
+                        chat_id,
+                        f"✅ Проверка завершена — найдено {len(user_tours)} тур(ов) по вашим фильтрам.\n"
+                        f"⏱ Следующая проверка через {config.CHECK_INTERVAL_MINUTES} мин."
+                    )
+                except Exception:
+                    pass
+            else:
+                try:
+                    await app.bot.send_message(
+                        chat_id,
+                        f"🔍 Проверил Novatours и TEZ Tour — {len(all_tours)} предложений.\n"
+                        f"По вашим фильтрам ничего не найдено.\n"
+                        f"⏱ Следующая проверка через {config.CHECK_INTERVAL_MINUTES} мин."
+                    )
+                except Exception:
+                    pass
 
     return new_tours
 
@@ -531,7 +550,11 @@ def main():
         for cid in get_active_users():
             try:
                 await app.bot.send_message(
-                    cid, "🤖 Бот запущен! Ищу предложения..",
+                    cid,
+                    f"🤖 Бот запущен!\n\n"
+                    f"📍 Вылет из Таллина → Египет\n"
+                    f"🔍 Проверяю Novatours и TEZ Tour...\n"
+                    f"⏱ Автопроверка каждые {config.CHECK_INTERVAL_MINUTES} мин",
                     reply_markup=main_keyboard(cid)
                 )
             except Exception:

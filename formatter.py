@@ -1,5 +1,4 @@
 from datetime import datetime
-from ratings import get_rating
 
 MEAL_MAP = {
     "uai": "🍽️🍽️ Ультра все включено",
@@ -92,18 +91,14 @@ def format_tour(tour: dict) -> tuple:
     seats       = tour.get("seats_left")
     url         = tour.get("url") or ""
     image       = str(tour.get("image") or "")
+    flight_time = tour.get("flight_time") or ""
 
     arrow = price_arrow(hotel, operator, price)
-    rating, rating_link = get_rating(hotel)
-
     lines = [
-        f"🔥 <b>ГОРЯЩИЙ ТУР — {destination.upper()}</b>",
-        "",
         f"🏨 <b>{hotel}</b> {stars}".strip(),
+        f"📍 {destination}",
     ]
 
-    if rating:
-        lines.append(f'⭐ Рейтинг: <b>{rating}/10</b>  <a href="{rating_link}">→ отзывы</a>')
 
     if meal:
         lines.append(meal)
@@ -116,10 +111,14 @@ def format_tour(tour: dict) -> tuple:
     lines.append("")
 
     if dep and ret:
-        lines.append(f"✈️  Вылет:   <b>{dep}</b>")
-        lines.append(f"🏠  Возврат: <b>{ret}</b>")
+        lines.append(f"✈️ Вылет: <b>{dep}</b>")
+        lines.append(f"🏠 Возврат: <b>{ret}</b>")
     elif dep:
-        lines.append(f"✈️  Вылет: <b>{dep}</b> из Таллина")
+        lines.append(f"✈️ Вылет: <b>{dep}</b> из Таллина")
+
+    if flight_time:
+        for fl in flight_time.split("\n"):
+            lines.append(fl)
 
     if nights:
         lines.append(f"🌙 Длительность: <b>{nights} ночей</b>")
@@ -157,13 +156,13 @@ def fmt_start() -> str:
     )
 
 
-def fmt_status(users: int, last_check: str, total: int) -> str:
+def fmt_status(users: int, last_check: str, total: int, interval_min: int = 30) -> str:
     return (
         f"📊 <b>Статус</b>\n\n"
         f"👥 Подписчиков: {users}\n"
         f"🕐 Последняя проверка: {last_check}\n"
         f"✅ Туров найдено всего: {total}\n"
-        f"⏱ Следующая через ~30 мин"
+        f"⏱ Следующая через ~{interval_min} мин"
     )
 
 

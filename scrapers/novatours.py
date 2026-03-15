@@ -157,14 +157,25 @@ def fetch_novatours() -> list:
                 if offers:
                     best = min(offers, key=lambda x: x.get("price", 9999))
 
-                    # ✅ Время вылета — берём все возможные поля
+                    # Время вылета — берём все возможные поля
+                    # check_in = дата заезда в отель, вылет на 1 день раньше
                     dep_raw = (
                         best.get("departure_datetime") or
-                        best.get("departure_time") or
-                        best.get("check_in_datetime") or
-                        best.get("check_in") or ""
+                        best.get("departure_time") or ""
                     )
-                    check_in = _parse_datetime(dep_raw)
+                    if dep_raw:
+                        check_in = _parse_datetime(dep_raw)
+                    else:
+                        # Нет поля вылета — берём check_in и вычитаем 1 день
+                        ci_raw = best.get("check_in_datetime") or best.get("check_in") or ""
+                        if ci_raw:
+                            try:
+                                ci_dt = datetime.strptime(str(ci_raw)[:10], "%Y-%m-%d")
+                                check_in = (ci_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+                            except Exception:
+                                check_in = _parse_datetime(ci_raw)
+                        else:
+                            check_in = ""  
 
                     # ✅ Время возврата
                     ret_raw = (
