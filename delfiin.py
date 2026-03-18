@@ -1,155 +1,290 @@
 """
-Delfiin.ee — парсер горящих туров в Египет из Таллина
+delfiin.eu — парсер горящих туров в Египет из Таллина
+Парсит страницы рейсов напрямую. Структура HTML известна.
 """
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
-SITE = "https://www.delfiin.ee"
+SITE = "https://www.delfiin.eu"
+
+# URL шаблоны: /ru/sooduspakkumised/egiptus_hurghada/DDMMННН/TIMESTAMP/
+# Парсим индекс и берём все рейсы с нужным кол-вом ночей
+EGYPT_PAGES = [
+    ("Хургада",       f"{SITE}/ru/sooduspakkumised/egiptus_hurghada"),
+    ("Шарм-эль-Шейх", f"{SITE}/ru/sooduspakkumised/egiptus_sharm_el_sheikh"),
+    ("Марса-Алам",    f"{SITE}/ru/sooduspakkumised/egiptus_el_alamein"),
+]
+
+MIN_NIGHTS   = 7
+MAX_NIGHTS   = 14
+MAX_DAYS_AHEAD = 60
+MAX_PAGES    = 20  # максимум страниц рейсов открываем
 
 
 def fetch_delfiin() -> list:
     try:
-        from playwright.sync_api import sync_playwright
+        import requests
+        from bs4 import BeautifulSoup
     except ImportError:
-        logger.error("Playwright не установлен")
+        logger.error("pip install requests beautifulsoup4")
         return []
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-        page = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            locale="ru-RU",
-        ).new_page()
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Language": "ru-RU,ru;q=0.9",
+    })
 
-        page.goto("https://www.delfiin.ee/ru/sooduspakkumised/1773705600/",
-                  wait_until="networkidle", timeout=40000)
-        page.wait_for_timeout(5000)
-        html = page.content()
-        browser.close()
+    all_tours = []
 
-    tours = _parse_html(html)
-    logger.info(f"Delfiin: {len(tours)} туров" if tours else "Delfiin: туры не найдены")
+    for destination, index_url in EGYPT_PAGES:
+        try:
+            resp = session.get(index_url, timeout=20)
+            resp.raise_for_status()
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            flight_pages = _get_flight_pages(soup, destination)
+            logger.info(f"Delfiin {destination}: {len(flight_pages)} страниц рейсов")
+
+            for page_info in flight_pages[:MAX_PAGES]:
+                try:
+                    tours = _parse_flight_page(session, page_info, destination)
+                    all_tours.extend(tours)
+                    logger.info(f"Delfiin {destination} {page_info['dep_date']} {page_info['nights']}н: {len(tours)} туров")
+                except Exception as e:
+                    logger.debug(f"Delfiin страница {page_info.get('url','')} ошибка: {e}")
+
+        except Exception as e:
+            logger.error(f"Delfiin {destination} ошибка: {e}")
+
+    logger.info(f"Delfiin итого: {len(all_tours)} туров")
+    return all_tours
+
+
+def _get_flight_pages(soup, destination: str) -> list:
+    """
+    Парсит индекс-страницу и возвращает список URL страниц рейсов.
+    URL формат: /ru/sooduspakkumised/egiptus_hurghada/28031007/1774656000/
+    Паттерн: DDMMСУФ NIGHTS / TIMESTAMP
+    """
+    today  = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    cutoff = today + timedelta(days=MAX_DAYS_AHEAD)
+
+    results = []
+    seen = set()
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        # Ищем ссылки вида /ru/sooduspakkumised/.../DDMMXXNN/TIMESTAMP/
+        m = re.search(
+            r'/sooduspakkumised/[^/]+/(\d{2})(\d{2})\d{2}(\d{2})/(\d{9,11})/',
+            href
+        )
+        if not m:
+            continue
+
+        day    = int(m.group(1))
+        month  = int(m.group(2))
+        nights = int(m.group(3))
+        ts     = m.group(4)
+
+        if not (MIN_NIGHTS <= nights <= MAX_NIGHTS):
+            continue
+
+        year = today.year
+        try:
+            dep_dt = datetime(year, month, day)
+            if dep_dt < today - timedelta(days=1):
+                dep_dt = datetime(year + 1, month, day)
+            if not (today <= dep_dt <= cutoff):
+                continue
+            dep_date = dep_dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+        url = (SITE + href) if href.startswith("/") else href
+        url = url.split("#")[0].rstrip("/") + "/"
+
+        key = f"{dep_date}|{nights}|{ts}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        results.append({
+            "url":      url,
+            "dep_date": dep_date,
+            "nights":   nights,
+        })
+
+    # Сортируем по дате
+    results.sort(key=lambda x: (x["dep_date"], x["nights"]))
+    return results
+
+
+def _parse_flight_page(session, page_info: dict, destination: str) -> list:
+    from bs4 import BeautifulSoup
+
+    resp = session.get(page_info["url"], timeout=25)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    dep_date = page_info["dep_date"]
+    nights   = page_info["nights"]
+    tours    = []
+    seen     = set()
+
+    try:
+        return_date = (
+            datetime.strptime(dep_date, "%Y-%m-%d") + timedelta(days=nights)
+        ).strftime("%Y-%m-%d")
+    except Exception:
+        return_date = ""
+
+    dep_dt = datetime.strptime(dep_date, "%Y-%m-%d")
+
+    section = None
+    offerid = None
+    for suffix in ["10", "11", "00"]:
+        sid = f"s{dep_dt.day:02d}{dep_dt.month:02d}{suffix}{nights:02d}"
+        sec = soup.find("div", id=sid)
+        if sec:
+            section = sec
+            offerid = f"{dep_dt.day:02d}{dep_dt.month:02d}{suffix}{nights:02d}"
+            break
+
+    if not section:
+        section = soup.find("div", class_="offer_content")
+
+    if not section:
+        return []
+
+    _parse_rows(section, dep_date, nights, destination, return_date, tours, seen)
+
+    if offerid:
+        ts_m = re.search(r'/(\d{9,11})/', page_info["url"])
+        ts = ts_m.group(1) if ts_m else ""
+        if ts:
+            try:
+                ajax_resp = session.get(
+                    f"{SITE}/offers_right_loader.php",
+                    params={"offerid": offerid, "str": "", "dz": str(nights),
+                            "dat": ts, "loc": "10", "rus": ""},
+                    timeout=20
+                )
+                logger.info(f"AJAX {offerid} status={ajax_resp.status_code} len={len(ajax_resp.text)}")
+                if ajax_resp.status_code == 200 and ajax_resp.text.strip():
+                    ajax_soup = BeautifulSoup(ajax_resp.text, "html.parser")
+                    _parse_rows(ajax_soup, dep_date, nights, destination, return_date, tours, seen)
+            except Exception as e:
+                logger.debug(f"AJAX error {offerid}: {e}")
+
     return tours
 
 
-def _parse_html(html: str) -> list:
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, "html.parser")
-    tours = []
+def _parse_rows(container, dep_date, nights, destination, return_date, tours, seen):
+    try:
+        return_date_calc = (
+            datetime.strptime(dep_date, "%Y-%m-%d") + timedelta(days=nights)
+        ).strftime("%Y-%m-%d")
+        if not return_date:
+            return_date = return_date_calc
+    except Exception:
+        pass
 
-    # Каждый тур — строка таблицы с классом содержащим "offer" или tr с ссылкой showhotel
-    rows = soup.find_all("tr")
-    for row in rows:
+    for tr in container.find_all("tr", class_=re.compile(r'\bhotel\b')):
         try:
-            link_tag = row.find("a", href=re.compile(r"showhotel\.php"))
-            if not link_tag:
+            o1 = tr.find("td", class_="o1")
+            if not o1:
                 continue
-
-            href = link_tag.get("href", "")
-            url  = href if href.startswith("http") else SITE + "/" + href.lstrip("/")
-
-            # Название отеля
-            hotel = link_tag.get_text(strip=True)
-            if not hotel:
+            link = o1.find("a", href=True)
+            if not link:
                 continue
+            hotel_name = link.get_text(strip=True)
+            if not hotel_name:
+                continue
+            hotel_url = link["href"]
+            if hotel_url.startswith("/"):
+                hotel_url = SITE + hotel_url
 
-            # Все ячейки строки
-            cells = [td.get_text(strip=True) for td in row.find_all("td")]
-
-            # Ищем дату (формат DD.MM.YY или DD.MM.YYYY)
-            departure_date = ""
-            for cell in cells:
-                m = re.search(r'(\d{2})\.(\d{2})\.(\d{2,4})', cell)
-                if m:
-                    d, mo, y = m.groups()
-                    y = "20" + y if len(y) == 2 else y
-                    try:
-                        departure_date = datetime(int(y), int(mo), int(d)).strftime("%Y-%m-%d")
-                    except Exception:
-                        pass
-                    break
-
-            # Ищем ночи
-            nights = 0
-            for cell in cells:
-                m = re.search(r'(\d+)\s*[нn]', cell.lower())
-                if m:
-                    nights = int(m.group(1))
-                    break
-
-            # Ищем цену
-            price = 0.0
-            for cell in cells:
-                m = re.search(r'(\d+)', cell.replace(" ", ""))
-                if m:
-                    val = int(m.group(1))
-                    if 100 <= val <= 5000:
-                        price = float(val)
-                        break
-
-            # Направление
-            destination = "Египет"
-            for cell in cells:
-                cl = cell.lower()
-                if "хургада" in cl or "hurghada" in cl:
-                    destination = "Хургада"
-                    break
-                elif "шарм" in cl or "sharm" in cl:
-                    destination = "Шарм-эль-Шейх"
-                    break
-
-            # Питание
-            meal_plan = ""
-            for cell in cells:
-                cl = cell.lower()
-                if any(k in cl for k in ["all inclusive", "ai", "все включено", "kõik hinnas"]):
-                    meal_plan = "All Inclusive"
-                    break
-                elif any(k in cl for k in ["uai", "ultra"]):
-                    meal_plan = "Ultra All Inclusive"
-                    break
-
-            # Звёзды
             stars = 0
-            for cell in cells:
-                m = re.search(r'(\d)\s*\*', cell)
-                if m:
-                    stars = int(m.group(1))
-                    break
-            if not stars:
-                m = re.search(r'(\d)\s*\*', hotel)
-                if m:
-                    stars = int(m.group(1))
+            ms = re.search(r'\((\d)[*★]\)', hotel_name)
+            if ms:
+                stars = int(ms.group(1))
 
-            if price <= 0:
+            room_div = o1.find("div", class_="room")
+            meal_plan = ""
+            if room_div:
+                meal_plan = _detect_meal(room_div.get_text(" ").lower())
+
+            o2 = tr.find("td", class_="o2")
+            if not o2:
                 continue
+            price_span = o2.find("span", class_="price")
+            price_text = price_span.get_text(strip=True) if price_span else o2.get_text(strip=True)
+            price_m = re.search(r'(\d+)', price_text.replace(" ", "").replace("\xa0", ""))
+            if not price_m:
+                continue
+            price = float(price_m.group(1))
+            if price < 50 or price > 9999:
+                continue
+
+            flight_time = ""
+            o5 = tr.find("td", class_="o5")
+            if o5:
+                times = re.findall(r'(\d{2}:\d{2})-(\d{2}:\d{2})', o5.get_text())
+                if len(times) >= 2:
+                    flight_time = f"✈️ Таллин → {destination}: {times[0][0]}–{times[0][1]}\n✈️ {destination} → Таллин: {times[1][0]}–{times[1][1]}"
+                elif len(times) == 1:
+                    flight_time = f"✈️ Таллин → {destination}: {times[0][0]}–{times[0][1]}"
+
+            seats_left = None
+            o4 = tr.find("td", class_="o4")
+            if o4:
+                img = o4.find("img")
+                if img:
+                    sm = re.search(r'tickets-(\d+)', img.get("src", ""))
+                    if sm:
+                        seats_left = int(sm.group(1))
+
+            key = f"{hotel_name}|{dep_date}|{price}"
+            if key in seen:
+                continue
+            seen.add(key)
 
             tours.append({
                 "operator":       "Delfiin",
-                "hotel":          hotel,
+                "hotel":          hotel_name,
                 "destination":    destination,
                 "price":          price,
                 "nights":         nights,
-                "departure_date": departure_date,
-                "return_date":    "",
+                "departure_date": dep_date,
+                "return_date":    return_date,
                 "meal_plan":      meal_plan,
                 "stars":          stars,
-                "seats_left":     None,
+                "seats_left":     seats_left,
                 "image":          "",
-                "url":            url,
+                "flight_time":    flight_time,
+                "url":            hotel_url,
             })
 
         except Exception as e:
-            logger.debug(f"Delfiin row error: {e}")
-            continue
+            logger.debug(f"Delfiin tr ошибка: {e}")
 
-    # Дедупликация
-    seen, out = set(), []
-    for t in tours:
-        k = f"{t['hotel']}|{t['price']}"
-        if k not in seen:
-            seen.add(k)
-            out.append(t)
-    return out
+
+def _detect_meal(text: str) -> str:
+    if any(k in text for k in ["ultra all", "uai", "ультра"]):
+        return "Ultra All Inclusive"
+    if any(k in text for k in ["всё включено", "все включено", "all inclusive", "kõik hinnas"]):
+        return "All Inclusive"
+    if any(k in text for k in ["half board", " hb", "полупансион"]):
+        return "HB"
+    if any(k in text for k in ["завтраки+ужины", "завтраки + ужины"]):
+        return "HB"
+    if any(k in text for k in ["завтрак", "breakfast", " bb"]):
+        return "BB"
+    if any(k in text for k in ["room only", " ro", "без питания"]):
+        return "RO"
+    return ""

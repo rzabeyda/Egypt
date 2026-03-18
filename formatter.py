@@ -106,7 +106,7 @@ def format_tour(tour: dict) -> tuple:
         lines.append(arrow)
 
     lines.append("")
-    lines.append(f"💰 <b>{price:.0f}€</b> / чел  (при размещении 2 чел)")
+    lines.append(f"💰 <b>{price:.0f}€</b> / чел")
     lines.append(f"💵 За двоих: <b>{price * 2:.0f}€</b>")
     lines.append("")
 
@@ -189,17 +189,24 @@ def fmt_settings(s: dict) -> str:
     else:
         interval_str = f"{interval} мин."
 
-    price_val = s.get("price_max", 1000)
-    price_str = "без лимита" if price_val == 9999 else f"{price_val}€"
+    price_ranges = s.get("price_ranges", "any")
+    if price_ranges == "any":
+        price_str = "любая"
+    else:
+        price_str = price_ranges.replace(",", ", ").replace("0-299", "до 299€").replace("300-499", "300–499€").replace("500-799", "500–799€").replace("800-9999", "800€+")
 
-    days_val = int(s.get("days_filter", 30))
+    days_val = int(s.get("days_filter", 60))
+
+    chains_val = s.get("chains_filter", "any")
+    chains_str = "🏨 Любая сеть" if chains_val == "any" else f"🏨 {chains_val.replace(',', ', ')}"
 
     return (
         f"⚙️ <b>Мои настройки</b>\n\n"
         f"⏱ Частота: <b>{interval_str}</b>\n"
         f"🏙 Город: <b>{city_labels.get(s.get('city_filter', 'all'), 'Все')}</b>\n"
         f"📅 Вылет: <b>в ближайшие {days_val} дней</b>\n"
-        f"💰 Макс. цена: <b>{price_str}</b> / чел\n"
+        f"💰 Цена: <b>{price_str}</b> / чел\n"
         f"🌟 Звёзды: <b>{s.get('stars_min', 3)}★ — {s.get('stars_max', 5)}★</b>\n"
+        f"{chains_str}\n"
         f"{meal_labels.get(s.get('meal_filter', 'ai,uai'), '🍽️ AI')}"
     )

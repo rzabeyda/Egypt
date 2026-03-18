@@ -22,12 +22,11 @@ import config
 from database import (
     init_db, add_user, remove_user, get_active_users,
     get_recent_tours,
-    get_settings, set_setting,
+    get_settings, set_setting, reset_settings,
 )
 from filters import passes_filters
 from formatter import format_tour, fmt_start, fmt_status, fmt_settings
-from scrapers import fetch_novatours, fetch_teztour, fetch_coral, fetch_joinup
-from scrapers.delfiin import fetch_delfiin
+from delfiin import fetch_delfiin
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +77,9 @@ def kb_settings(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🍽 Питание", callback_data="menu_meal"),
         ],
         [
+            InlineKeyboardButton("🏨 Сети отелей", callback_data="menu_chains"),
+        ],
+        [
             InlineKeyboardButton("🔄 Сбросить все фильтры", callback_data="reset_filters"),
         ],
     ])
@@ -114,24 +116,12 @@ def kb_days() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("7 дней",   callback_data="days_7"),
+            InlineKeyboardButton("14 дней",  callback_data="days_14"),
             InlineKeyboardButton("30 дней",  callback_data="days_30"),
+        ],
+        [
+            InlineKeyboardButton("60 дней",  callback_data="days_60"),
             InlineKeyboardButton("180 дней", callback_data="days_180"),
-        ],
-        [InlineKeyboardButton("◀️ Назад", callback_data="settings")],
-    ])
-
-
-def kb_price() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("200€", callback_data="price_200"),
-            InlineKeyboardButton("400€", callback_data="price_400"),
-            InlineKeyboardButton("600€", callback_data="price_600"),
-        ],
-        [
-            InlineKeyboardButton("800€",       callback_data="price_800"),
-            InlineKeyboardButton("1000€",      callback_data="price_1000"),
-            InlineKeyboardButton("Без лимита", callback_data="price_9999"),
         ],
         [InlineKeyboardButton("◀️ Назад", callback_data="settings")],
     ])
@@ -153,15 +143,74 @@ def kb_stars() -> InlineKeyboardMarkup:
     ])
 
 
-def kb_meal() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🍽️ Все включено (AI)",           callback_data="meal_ai,uai")],
-        [InlineKeyboardButton("🍽️🍽️ Ультра все включено (UAI)", callback_data="meal_uai")],
-        [InlineKeyboardButton("🥐 Только завтраки (BB)",         callback_data="meal_bb")],
-        [InlineKeyboardButton("🏨 Без питания (RO)",             callback_data="meal_ro")],
-        [InlineKeyboardButton("🍴 Любое питание",                callback_data="meal_any")],
-        [InlineKeyboardButton("◀️ Назад",                        callback_data="settings")],
-    ])
+def kb_price(current: str = "any") -> InlineKeyboardMarkup:
+    """current — строка через запятую из выбранных диапазонов, напр. '300-499,500-799'"""
+    ranges = [
+        ("0-299",    "до 299€"),
+        ("300-499",  "300–499€"),
+        ("500-799",  "500–799€"),
+        ("800-9999", "800€+"),
+    ]
+    selected = set(current.split(",")) if current != "any" else set()
+    rows = []
+    row = []
+    for key, label in ranges:
+        tick = "✅ " if key in selected else ""
+        row.append(InlineKeyboardButton(f"{tick}{label}", callback_data=f"price_toggle_{key}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton("♾ Любая цена", callback_data="price_toggle_any")])
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="settings")])
+    return InlineKeyboardMarkup(rows)
+
+
+def kb_meal(current: str = "any") -> InlineKeyboardMarkup:
+    options = [
+        ("any",    "🍴 Любое питание"),
+        ("ai,uai", "🍽️ Все включено (AI)"),
+        ("uai",    "🍽️🍽️ Ультра все включено"),
+        ("bb",     "🥐 Завтраки (BB)"),
+        ("hb",     "🥗 Half Board (HB)"),
+        ("ro",     "🏨 Без питания (RO)"),
+    ]
+    rows = []
+    for key, label in options:
+        tick = "✅ " if current == key else ""
+        rows.append([InlineKeyboardButton(f"{tick}{label}", callback_data=f"meal_{key}")])
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="settings")])
+    return InlineKeyboardMarkup(rows)
+
+
+def kb_chains(current: str = "any") -> InlineKeyboardMarkup:
+    chains = [
+        ("rixos",         "Rixos"),
+        ("jaz",           "Jaz"),
+        ("pickalbatros",  "Pickalbatros"),
+        ("sunrise",       "Sunrise"),
+        ("steigenberger", "Steigenberger"),
+        ("hilton",        "Hilton"),
+        ("barcelo",       "Barceló"),
+        ("domina",        "Domina"),
+        ("baron",         "Baron"),
+        ("titanic",       "Titanic"),
+    ]
+    selected = set(current.split(",")) if current != "any" else set()
+    rows = []
+    row = []
+    for key, label in chains:
+        tick = "✅ " if key in selected else ""
+        row.append(InlineKeyboardButton(f"{tick}{label}", callback_data=f"chain_toggle_{key}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton("🍀 Любая сеть", callback_data="chain_any")])
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="settings")])
+    return InlineKeyboardMarkup(rows)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -183,16 +232,15 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     s = get_settings(chat_id)
     s["chat_id"] = chat_id
     await update.message.reply_text(
-    await update.message.reply_text(
         "⚙️ <b>Ваши фильтры по умолчанию:</b>\n\n" + fmt_settings(s),
         parse_mode="HTML"
-    )
     )
     await update.message.reply_text("🤖 Ищу предложения.. ожидайте!")
     all_tours = await fetch_all_tours()
     s = get_settings(chat_id)
     user_tours = [t for t in all_tours if passes_filters(t, s)]
     if user_tours:
+        user_tours.sort(key=lambda t: t.get("price", 0), reverse=True)
         for tour in user_tours:
             await _send_tour(ctx.bot, chat_id, tour)
     else:
@@ -260,11 +308,12 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
     elif text == "🔍 Искать туры":
-        await update.message.reply_text("🤖 Ищу предложения.. ожидайте!")
+        await update.message.reply_text("🤖 Ищу предложения на delfiin.eu, подождите!")
         all_tours = await fetch_all_tours()
         s = get_settings(chat_id)
         user_tours = [t for t in all_tours if passes_filters(t, s)]
         if user_tours:
+            user_tours.sort(key=lambda t: t.get("price", 0), reverse=True)
             for tour in user_tours:
                 await _send_tour(ctx.bot, chat_id, tour)
         else:
@@ -290,14 +339,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "reset_filters":
-        from config import MAX_PRICE_EUR
-        set_setting(chat_id, "interval_min", 30)
-        set_setting(chat_id, "meal_filter", "any")
-        set_setting(chat_id, "stars_min", 3)
-        set_setting(chat_id, "stars_max", 5)
-        set_setting(chat_id, "city_filter", "all")
-        set_setting(chat_id, "price_max", 9999)
-        set_setting(chat_id, "days_filter", 180)
+        reset_settings(chat_id)
         await _back_settings(query, chat_id, "🔄 Фильтры сброшены до стандартных!")
         return
 
@@ -321,9 +363,53 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "menu_price":
+        s = get_settings(chat_id)
+        current = s.get("price_ranges", "any")
         await query.message.edit_text(
-            "💰 <b>Максимальная цена</b>\n\nЗа 1 человека при двухместном размещении:",
-            parse_mode="HTML", reply_markup=kb_price()
+            "💰 <b>Цена за 1 человека</b>\n\nМожно выбрать несколько диапазонов:",
+            parse_mode="HTML", reply_markup=kb_price(current)
+        )
+        return
+
+    if data.startswith("price_toggle_"):
+        key = data.replace("price_toggle_", "")
+        s = get_settings(chat_id)
+        current = s.get("price_ranges", "any")
+        if key == "any":
+            new_val = "any"
+        else:
+            selected = set(current.split(",")) if current != "any" else set()
+            if key in selected:
+                selected.discard(key)
+            else:
+                selected.add(key)
+            new_val = ",".join(sorted(selected)) if selected else "any"
+        set_setting(chat_id, "price_ranges", new_val)
+        label = "любая" if new_val == "any" else new_val.replace(",", ", ")
+        await query.message.edit_text(
+            f"✅ Цена: {label}\n\nМожно выбрать несколько диапазонов:",
+            parse_mode="HTML", reply_markup=kb_price(new_val)
+        )
+        return
+
+    if data.startswith("price_range_"):
+        parts = data.split("_")
+        rmin, rmax = int(parts[2]), int(parts[3])
+        set_setting(chat_id, "price_min", rmin)
+        set_setting(chat_id, "price_max", rmax)
+        if rmax == 9999 and rmin == 0:
+            label = "без лимита"
+        elif rmax == 9999:
+            label = f"от {rmin}€"
+        elif rmin == 0:
+            label = f"до {rmax}€"
+        else:
+            label = f"{rmin}–{rmax}€"
+        s = get_settings(chat_id)
+        await query.message.edit_text(
+            f"✅ Цена: {label}\n\nВыбери диапазон цены / чел:",
+            parse_mode="HTML",
+            reply_markup=kb_price(s.get("price_ranges", "any"))
         )
         return
 
@@ -364,19 +450,47 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await _back_settings(query, chat_id, f"✅ Вылет в ближайшие: {val} дней")
         return
 
-    if data.startswith("price_"):
-        val = int(data.split("_")[1])
-        set_setting(chat_id, "price_max", val)
-        label = "без лимита" if val == 9999 else f"{val}€"
-        await _back_settings(query, chat_id, f"✅ Макс. цена: {label}")
-        return
-
     if data.startswith("stars_"):
         parts = data.split("_")
         mn, mx = int(parts[1]), int(parts[2])
         set_setting(chat_id, "stars_min", mn)
         set_setting(chat_id, "stars_max", mx)
         await _back_settings(query, chat_id, f"✅ Звёзды: {mn}★ — {mx}★")
+        return
+
+    if data == "menu_chains":
+        s = get_settings(chat_id)
+        current = s.get("chains_filter", "any")
+        await query.message.edit_text(
+            "🏨 <b>Сети отелей</b>\n\nВыбери одну или несколько сетей (нажимай — галочка появится).\nПо умолчанию — любая сеть.",
+            parse_mode="HTML", reply_markup=kb_chains(current)
+        )
+        return
+
+    if data.startswith("chain_toggle_"):
+        key = data.replace("chain_toggle_", "")
+        s = get_settings(chat_id)
+        current = s.get("chains_filter", "any")
+        selected = set(current.split(",")) if current != "any" else set()
+        if key in selected:
+            selected.discard(key)
+        else:
+            selected.add(key)
+        new_val = ",".join(sorted(selected)) if selected else "any"
+        set_setting(chat_id, "chains_filter", new_val)
+        label = "любая сеть" if new_val == "any" else new_val.replace(",", ", ")
+        await query.message.edit_text(
+            f"✅ Сети: {label}\n\nВыбери одну или несколько сетей:",
+            parse_mode="HTML", reply_markup=kb_chains(new_val)
+        )
+        return
+
+    if data == "chain_any":
+        set_setting(chat_id, "chains_filter", "any")
+        await query.message.edit_text(
+            "✅ Сети: любая\n\nВыбери одну или несколько сетей:",
+            parse_mode="HTML", reply_markup=kb_chains("any")
+        )
         return
 
     if data.startswith("meal_"):
@@ -425,11 +539,7 @@ async def _send_tour(bot, chat_id: int, tour: dict):
 # ══════════════════════════════════════════════════════════════
 
 SCRAPERS = [
-    ("Novatours", fetch_novatours),
-    ("TEZ Tour",  fetch_teztour),
-    ("Delfiin",   fetch_delfiin),
-    # ("Coral Travel", fetch_coral),
-    # ("Join Up",      fetch_joinup),
+    ("Delfiin", fetch_delfiin),
 ]
 
 
@@ -450,10 +560,7 @@ async def fetch_all_tours() -> list:
 
 
 async def run_check(app=None, notify_users=True) -> list:
-    """
-    Периодическая проверка (по расписанию).
-    Шлём всё что проходит глобальные фильтры.
-    """
+    """Периодическая проверка (по расписанию)."""
     global last_check_time, total_sent
     last_check_time = datetime.now().strftime("%d.%m.%Y %H:%M")
     logger.info(f"▶️  Проверка [{last_check_time}]")
@@ -502,7 +609,7 @@ async def run_check(app=None, notify_users=True) -> list:
                 try:
                     await app.bot.send_message(
                         chat_id,
-                        f"🔍 Проверил Novatours и TEZ Tour — {len(all_tours)} предложений.\n"
+                        f"🔍 Проверил Delfiin — {len(all_tours)} предложений.\n"
                         f"По вашим фильтрам ничего не найдено.\n"
                         f"⏱ Следующая проверка через {config.CHECK_INTERVAL_MINUTES} мин."
                     )
@@ -553,7 +660,7 @@ def main():
                     cid,
                     f"🤖 Бот запущен!\n\n"
                     f"📍 Вылет из Таллина → Египет\n"
-                    f"🔍 Проверяю Novatours и TEZ Tour...\n"
+                    f"🔍 Проверяю Delfiin.eu\n"
                     f"⏱ Автопроверка каждые {config.CHECK_INTERVAL_MINUTES} мин",
                     reply_markup=main_keyboard(cid)
                 )
@@ -569,9 +676,6 @@ def main():
 
     logger.info("🤖 Бот запущен!")
 
-    # На Python 3.12+ get_event_loop() больше не создаёт цикл автоматически,
-    # а внутри python-telegram-bot он всё ещё используется.
-    # Явно создаём и устанавливаем event loop, чтобы run_polling работал стабильно.
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

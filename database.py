@@ -44,14 +44,17 @@ def init_db():
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
-                chat_id      INTEGER PRIMARY KEY,
-                interval_min INTEGER DEFAULT 60,
-                meal_filter  TEXT    DEFAULT 'ai,uai',
-                stars_min    INTEGER DEFAULT 4,
-                stars_max    INTEGER DEFAULT 5,
-                city_filter  TEXT    DEFAULT 'all',
-                price_max    INTEGER DEFAULT 400,
-                days_filter  INTEGER DEFAULT 7
+                chat_id       INTEGER PRIMARY KEY,
+                interval_min  INTEGER DEFAULT 60,
+                meal_filter   TEXT    DEFAULT 'any',
+                stars_min     INTEGER DEFAULT 4,
+                stars_max     INTEGER DEFAULT 5,
+                city_filter   TEXT    DEFAULT 'all',
+                price_max     INTEGER DEFAULT 600,
+                price_min     INTEGER DEFAULT 0,
+                days_filter   INTEGER DEFAULT 60,
+                chains_filter TEXT    DEFAULT 'any',
+                price_ranges  TEXT    DEFAULT 'any'
             )
         """)
         conn.commit()
@@ -60,13 +63,16 @@ def init_db():
 
 def _migrate():
     migrations = [
-        ("user_settings", "days_filter",  "INTEGER DEFAULT 7"),
+        ("user_settings", "days_filter",  "INTEGER DEFAULT 60"),
         ("user_settings", "interval_min", "INTEGER DEFAULT 60"),
-        ("user_settings", "meal_filter",  "TEXT DEFAULT 'ai,uai'"),
+        ("user_settings", "meal_filter",  "TEXT DEFAULT 'any'"),
         ("user_settings", "stars_min",    "INTEGER DEFAULT 4"),
         ("user_settings", "stars_max",    "INTEGER DEFAULT 5"),
         ("user_settings", "city_filter",  "TEXT DEFAULT 'all'"),
-        ("user_settings", "price_max",    "INTEGER DEFAULT 400"),
+        ("user_settings", "price_max",     "INTEGER DEFAULT 600"),
+        ("user_settings", "price_min",     "INTEGER DEFAULT 0"),
+        ("user_settings", "chains_filter", "TEXT DEFAULT 'any'"),
+        ("user_settings", "price_ranges",  "TEXT DEFAULT 'any'"),
     ]
     with get_conn() as conn:
         for table, col, definition in migrations:
@@ -174,6 +180,14 @@ def get_recent_tours(limit=5) -> list:
 
 
 # ── Настройки ────────────────────────────────────────────────
+
+def reset_settings(chat_id: int):
+    """Сбрасывает настройки пользователя на дефолтные."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM user_settings WHERE chat_id=?", (chat_id,))
+        conn.commit()
+    _ensure_settings(chat_id)
+
 
 def _ensure_settings(chat_id: int):
     with get_conn() as conn:
