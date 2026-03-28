@@ -22,6 +22,7 @@ def init_db():
                 nights      INTEGER,
                 departure   TEXT,
                 url         TEXT,
+                image_url   TEXT    DEFAULT '',
                 sent_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -57,6 +58,13 @@ def init_db():
                 price_ranges  TEXT    DEFAULT 'any'
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS hotel_images (
+                hotel_url   TEXT PRIMARY KEY,
+                image_url   TEXT,
+                cached_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
     _migrate()
 
@@ -73,6 +81,7 @@ def _migrate():
         ("user_settings", "price_min",     "INTEGER DEFAULT 0"),
         ("user_settings", "chains_filter", "TEXT DEFAULT 'any'"),
         ("user_settings", "price_ranges",  "TEXT DEFAULT 'any'"),
+        ("sent_tours",    "image_url",     "TEXT DEFAULT ''"),
     ]
     with get_conn() as conn:
         for table, col, definition in migrations:
@@ -104,14 +113,14 @@ def mark_sent(tour: dict):
     with get_conn() as conn:
         conn.execute("""
             INSERT OR REPLACE INTO sent_tours
-              (hash,operator,hotel,destination,price,nights,departure,url,sent_at)
-            VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+              (hash,operator,hotel,destination,price,nights,departure,url,image_url,sent_at)
+            VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
         """, (
             tour_hash(tour),
             tour.get("operator",""), tour.get("hotel",""),
             tour.get("destination",""), tour.get("price",0),
             tour.get("nights",0), tour.get("departure_date",""),
-            tour.get("url",""),
+            tour.get("url",""), tour.get("image",""),
         ))
         conn.commit()
 
@@ -174,9 +183,16 @@ def get_active_users() -> list:
 
 def get_recent_tours(limit=5) -> list:
     with get_conn() as conn:
-        return [dict(r) for r in conn.execute(
+        rows = conn.execute(
             "SELECT * FROM sent_tours ORDER BY sent_at DESC LIMIT ?", (limit,)
-        ).fetchall()]
+        ).fetchall()
+        result = []
+        for r in rows:
+            t = dict(r)
+            # _send_tour ждёт поле "image", а в БД хранится "image_url"
+            t["image"] = t.get("image_url") or ""
+            result.append(t)
+        return result
 
 
 # ── Настройки ────────────────────────────────────────────────
@@ -209,8 +225,27 @@ def set_setting(chat_id: int, key: str, value):
         conn.commit()
 
 
-def is_paused(chat_id: int) -> bool:
-    return False
+def get_cached_image(hotel_url: str) -> str:
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT image_url FROM hotel_images WHERE hotel_url=?", (hotel_url,)
+            ).fetchone()
+            return row["image_url"] if row else None
+    except Exception:
+        return None
+
+
+def cache_image(hotel_url: str, image_url: str):
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO hotel_images (hotel_url, image_url) VALUES (?,?)",
+                (hotel_url, image_url)
+            )
+            conn.commit()
+    except Exception:
+        pass
 
 
 def pause_user(chat_id: int, minutes: int):

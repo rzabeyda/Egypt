@@ -47,15 +47,13 @@ def _fmt_datetime(d: str) -> str:
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
             dt = datetime.strptime(s[:16], fmt[:16])
-            if dt.hour or dt.minute:
-                return f"{dt.day} {MONTHS_RU[dt.month]} {dt.hour:02d}:{dt.minute:02d}"
-            return f"{dt.day} {MONTHS_RU[dt.month]}"
+            return f"{dt.day:02d}.{dt.month:02d}"
         except:
             continue
     for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
         try:
             dt = datetime.strptime(s[:10], fmt)
-            return f"{dt.day} {MONTHS_RU[dt.month]}"
+            return f"{dt.day:02d}.{dt.month:02d}"
         except:
             continue
     return s[:10]
@@ -94,51 +92,72 @@ def format_tour(tour: dict) -> tuple:
     flight_time = tour.get("flight_time") or ""
 
     arrow = price_arrow(hotel, operator, price)
+
+    # Рейтинг из нашей базы
+    rating_str = ""
+    try:
+        from ratings import get_rating
+        rating, _ = get_rating(hotel)
+        if rating:
+            rating_str = f"🏆 Рейтинг: {rating}/10"
+    except Exception:
+        pass
+
     lines = [
-        f"🏨 <b>{hotel}</b> {stars}".strip(),
-        f"📍 {destination}",
+        f"🏨 <b>{hotel}</b>",
     ]
 
+    if rating_str:
+        lines.append(rating_str)
 
-    if meal:
-        lines.append(meal)
+    lines.append("")
+    lines.append(f"📍 {destination}" + (f"  {meal}" if meal else ""))
+    lines.append(f"🌙 Отдых: <b>{nights} ночей</b>" if nights else "")
+    lines.append(f"💰 <b>{price:.0f}€</b> / чел | <b>{price * 2:.0f}€</b> / 2 чел")
+
     if arrow:
         lines.append(arrow)
 
     lines.append("")
-    lines.append(f"💰 <b>{price:.0f}€</b> / чел")
-    lines.append(f"💵 За двоих: <b>{price * 2:.0f}€</b>")
-    lines.append("")
 
     if dep and ret:
-        lines.append(f"✈️ Вылет: <b>{dep}</b>")
-        lines.append(f"🏠 Возврат: <b>{ret}</b>")
+        dep_time = ret_time = ""
+        if flight_time:
+            times = []
+            import re as _re
+            for m in _re.finditer(r'(\d{2}:\d{2})–(\d{2}:\d{2})', flight_time):
+                times.append(f"{m.group(1)}–{m.group(2)}")
+            if len(times) >= 1:
+                dep_time = times[0]
+            if len(times) >= 2:
+                ret_time = times[1]
+        dep_str = dep_time and f" | {dep_time}" or ""
+        ret_str = ret_time and f" | {ret_time}" or ""
+        lines.append(f"✈️ Вылет: <b>{dep}</b>{dep_str}")
+        lines.append(f"🏠 Домой: <b>{ret}</b>{ret_str}")
     elif dep:
         lines.append(f"✈️ Вылет: <b>{dep}</b> из Таллина")
-
-    if flight_time:
-        for fl in flight_time.split("\n"):
-            lines.append(fl)
-
-    if nights:
-        lines.append(f"🌙 Длительность: <b>{nights} ночей</b>")
 
     if seats is not None:
         try:
             sv = int(seats)
-            emoji = "🔴" if sv <= 3 else "🟡" if sv <= 6 else "🟢"
+            emoji = "😰" if sv <= 3 else "😐" if sv <= 6 else "🙂"
             lines.append(f"{emoji} Мест в самолёте: <b>{seats}</b>")
         except:
             pass
-
-    lines.append("")
-    lines.append(f"🏢 Оператор: {operator}")
 
     if url:
         lines.append("")
         lines.append(f'<a href="{url}">👉 Смотреть и бронировать</a>')
 
-    return "\n".join(lines), image
+    # Убираем пустые строки подряд
+    result = []
+    for line in lines:
+        if line == "" and result and result[-1] == "":
+            continue
+        result.append(line)
+
+    return "\n".join(result), image
 
 
 def fmt_start() -> str:
@@ -169,6 +188,7 @@ def fmt_status(users: int, last_check: str, total: int, interval_min: int = 30) 
 def fmt_settings(s: dict) -> str:
     meal_labels = {
         "ai,uai": "🍽️ Все включено (AI + UAI)",
+        "ai":     "🍽️ Все включено",
         "uai":    "🍽️🍽️ Ультра все включено",
         "bb":     "🥐 Только завтраки",
         "ro":     "🏨 Без питания",

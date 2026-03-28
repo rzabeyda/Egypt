@@ -45,9 +45,11 @@ def is_good_stars(stars, min_stars=3, max_stars=5) -> bool:
         s = int(str(stars))
         if s >= 100:
             s = s // 100
+        if s == 0:
+            return True  # звёзды не определены — не режем
         return min_stars <= s <= max_stars
     except Exception:
-        return False
+        return True  # не можем определить — пропускаем
 
 
 def is_within_days(departure_date: str, max_days: int) -> bool:

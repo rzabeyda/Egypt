@@ -67,9 +67,9 @@ def main_keyboard(chat_id: int) -> ReplyKeyboardMarkup:
 def kb_settings(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⏱ Время",    callback_data="menu_interval"),
+            InlineKeyboardButton("🔔 Спам",    callback_data="menu_interval"),
             InlineKeyboardButton("🏙 Город",   callback_data="menu_city"),
-            InlineKeyboardButton("📅 Дни",     callback_data="menu_days"),
+            InlineKeyboardButton("📅 Вылет",   callback_data="menu_days"),
         ],
         [
             InlineKeyboardButton("💰 Цена",    callback_data="menu_price"),
@@ -77,7 +77,7 @@ def kb_settings(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🍽 Питание", callback_data="menu_meal"),
         ],
         [
-            InlineKeyboardButton("🏨 Сети отелей", callback_data="menu_chains"),
+            InlineKeyboardButton("🏨 Сеть отелей", callback_data="menu_chains"),
         ],
         [
             InlineKeyboardButton("🔄 Сбросить все фильтры", callback_data="reset_filters"),
@@ -345,7 +345,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "menu_interval":
         await query.message.edit_text(
-            "⏱ <b>Частота обновлений</b>\n\nКак часто проверять и присылать новые туры?",
+            "⏱ <b>Частота рассылки (Спам)</b>\n\nКак часто проверять и присылать новые туры?",
             parse_mode="HTML", reply_markup=kb_interval()
         )
         return
@@ -462,7 +462,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         s = get_settings(chat_id)
         current = s.get("chains_filter", "any")
         await query.message.edit_text(
-            "🏨 <b>Сети отелей</b>\n\nВыбери одну или несколько сетей (нажимай — галочка появится).\nПо умолчанию — любая сеть.",
+            "🏨 <b>Сеть отелей</b>\n\nВыбери одну или несколько сетей (нажимай — галочка появится).\nПо умолчанию — любая сеть.",
             parse_mode="HTML", reply_markup=kb_chains(current)
         )
         return
@@ -523,10 +523,16 @@ async def _back_settings(query, chat_id: int, notice: str):
 
 async def _send_tour(bot, chat_id: int, tour: dict):
     text, image = format_tour(tour)
-    if image and image.startswith("http"):
+    if image:
         try:
-            await bot.send_photo(chat_id=chat_id, photo=image, caption=text, parse_mode="HTML")
-            return
+            if image.startswith("http"):
+                await bot.send_photo(chat_id=chat_id, photo=image, caption=text, parse_mode="HTML")
+            else:
+                import os
+                if os.path.isfile(image):
+                    with open(image, "rb") as f:
+                        await bot.send_photo(chat_id=chat_id, photo=f, caption=text, parse_mode="HTML")
+                    return
         except Exception:
             pass
     await bot.send_message(
@@ -581,14 +587,12 @@ async def run_check(app=None, notify_users=True) -> list:
 
     logger.info(f"Итого до фильтра: {len(all_tours)}")
 
-    new_tours = [t for t in all_tours if passes_filters(t)]
-
-    logger.info(f"✅ Новых предложений: {len(new_tours)}")
+    logger.info(f"✅ Всего туров: {len(all_tours)}")
 
     if notify_users and app:
         for chat_id in get_active_users():
             s = get_settings(chat_id)
-            user_tours = [t for t in new_tours if passes_filters(t, s)] if new_tours else []
+            user_tours = [t for t in all_tours if passes_filters(t, s)]
             if user_tours:
                 total_sent += len(user_tours)
                 for tour in user_tours:
@@ -598,25 +602,39 @@ async def run_check(app=None, notify_users=True) -> list:
                     except Exception as e:
                         logger.error(f"Ошибка отправки {chat_id}: {e}")
                 try:
+                    interval = s.get("interval_min", config.CHECK_INTERVAL_MINUTES)
+                    if interval >= 1440:
+                        interval_str = f"{interval // 1440} дн."
+                    elif interval >= 60:
+                        interval_str = f"{interval // 60} ч."
+                    else:
+                        interval_str = f"{interval} мин."
                     await app.bot.send_message(
                         chat_id,
                         f"✅ Проверка завершена — найдено {len(user_tours)} тур(ов) по вашим фильтрам.\n"
-                        f"⏱ Следующая проверка через {config.CHECK_INTERVAL_MINUTES} мин."
+                        f"⏱ Следующая проверка через {interval_str}"
                     )
                 except Exception:
                     pass
             else:
                 try:
+                    interval = s.get("interval_min", config.CHECK_INTERVAL_MINUTES)
+                    if interval >= 1440:
+                        interval_str = f"{interval // 1440} дн."
+                    elif interval >= 60:
+                        interval_str = f"{interval // 60} ч."
+                    else:
+                        interval_str = f"{interval} мин."
                     await app.bot.send_message(
                         chat_id,
                         f"🔍 Проверил Delfiin — {len(all_tours)} предложений.\n"
                         f"По вашим фильтрам ничего не найдено.\n"
-                        f"⏱ Следующая проверка через {config.CHECK_INTERVAL_MINUTES} мин."
+                        f"⏱ Следующая проверка через {interval_str}"
                     )
                 except Exception:
                     pass
 
-    return new_tours
+    return all_tours
 
 
 # ══════════════════════════════════════════════════════════════
@@ -656,12 +674,20 @@ def main():
         await asyncio.sleep(5)
         for cid in get_active_users():
             try:
+                s = get_settings(cid)
+                interval = s.get("interval_min", config.CHECK_INTERVAL_MINUTES)
+                if interval >= 1440:
+                    interval_str = f"{interval // 1440} дн."
+                elif interval >= 60:
+                    interval_str = f"{interval // 60} ч."
+                else:
+                    interval_str = f"{interval} мин."
                 await app.bot.send_message(
                     cid,
                     f"🤖 Бот запущен!\n\n"
                     f"📍 Вылет из Таллина → Египет\n"
                     f"🔍 Проверяю Delfiin.eu\n"
-                    f"⏱ Автопроверка каждые {config.CHECK_INTERVAL_MINUTES} мин",
+                    f"⏱ Автопроверка каждые {interval_str}",
                     reply_markup=main_keyboard(cid)
                 )
             except Exception:
