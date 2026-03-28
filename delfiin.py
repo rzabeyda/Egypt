@@ -20,8 +20,8 @@ EGYPT_PAGES = [
 
 MIN_NIGHTS   = 7
 MAX_NIGHTS   = 14
-MAX_DAYS_AHEAD = 60
-MAX_PAGES    = 20  # максимум страниц рейсов открываем
+MAX_DAYS_AHEAD = 14
+MAX_PAGES    = 10  # максимум страниц рейсов открываем
 
 
 def fetch_delfiin() -> list:
@@ -72,7 +72,15 @@ def fetch_delfiin() -> list:
 
     logger.info(f"Delfiin итого: {len(unique_tours)} туров (было {len(all_tours)} с дублями)")
 
-    # Картинки: берём из кэша БД, новые грузим максимум 20 штук за раз
+    # Картинки: загружаем весь кэш одним запросом, новые грузим максимум 5 штук
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            rows = conn.execute("SELECT hotel_url, image_url FROM hotel_images").fetchall()
+            image_db_cache = {r["hotel_url"]: r["image_url"] for r in rows}
+    except Exception:
+        image_db_cache = {}
+
     hotel_image_cache = {}
     new_fetches = 0
     for t in unique_tours:
@@ -82,15 +90,10 @@ def fetch_delfiin() -> list:
         if url in hotel_image_cache:
             t["image"] = hotel_image_cache[url]
             continue
-        try:
-            from database import get_cached_image
-            cached = get_cached_image(url)
-        except Exception:
-            cached = None
-        if cached is not None:
-            hotel_image_cache[url] = cached
-            t["image"] = cached
-        elif new_fetches < 20:
+        if url in image_db_cache:
+            hotel_image_cache[url] = image_db_cache[url]
+            t["image"] = image_db_cache[url]
+        elif new_fetches < 5:
             img = _get_hotel_image(session, url)
             hotel_image_cache[url] = img
             t["image"] = img
@@ -324,7 +327,7 @@ def _get_hotel_image(session, hotel_url: str) -> str:
         # Меняем showhotel.php на hoteldesc.php
         desc_url = hotel_url.replace("showhotel.php", "hoteldesc.php")
 
-        resp = session.get(desc_url, timeout=15)
+        resp = session.get(desc_url, timeout=5)
         if resp.status_code != 200:
             cache_image(hotel_url, "")
             return ""

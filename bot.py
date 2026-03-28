@@ -79,10 +79,9 @@ def kb_settings(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🍽 Питание", callback_data="menu_meal"),
         ],
         [
-            InlineKeyboardButton("🏨 Сеть отелей", callback_data="menu_chains"),
-        ],
-        [
-            InlineKeyboardButton("🔄 Сбросить все фильтры", callback_data="reset_filters"),
+            InlineKeyboardButton("🏨 Отели",       callback_data="menu_chains"),
+            InlineKeyboardButton("🔄 Сброс",        callback_data="reset_filters"),
+            InlineKeyboardButton("🔍 Поиск",         callback_data="search_now"),
         ],
     ])
 
@@ -242,7 +241,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_tours = [t for t in all_tours if passes_filters(t, s)]
     if user_tours:
         user_tours = _dedup_tours(user_tours)
-        user_tours.sort(key=lambda t: t.get("price", 0), reverse=True)
+        user_tours.sort(key=lambda t: t.get("price", 0))
         for tour in user_tours:
             await _send_tour(ctx.bot, chat_id, tour)
     else:
@@ -341,7 +340,7 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user_tours = [t for t in all_tours if passes_filters(t, s)]
         if user_tours:
             user_tours = _dedup_tours(user_tours)
-            user_tours.sort(key=lambda t: t.get("price", 0), reverse=True)
+            user_tours.sort(key=lambda t: t.get("price", 0))
             for tour in user_tours:
                 await _send_tour(ctx.bot, chat_id, tour)
         else:
@@ -366,7 +365,19 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data == "reset_filters":
+    if data == "search_now":
+        await query.message.reply_text("🤖 Ищу предложения на delfiin.eu, подождите!")
+        all_tours = await fetch_all_tours()
+        s = get_settings(chat_id)
+        user_tours = [t for t in all_tours if passes_filters(t, s)]
+        if user_tours:
+            user_tours = _dedup_tours(user_tours)
+            user_tours.sort(key=lambda t: t.get("price", 0))
+            for tour in user_tours:
+                await _send_tour(query.message.bot, chat_id, tour, force=True)
+        else:
+            await query.message.reply_text("😕 Туров по вашим фильтрам сейчас нет.")
+        return
         reset_settings(chat_id)
         await _back_settings(query, chat_id, "🔄 Фильтры сброшены до стандартных!")
         return
@@ -549,8 +560,6 @@ async def _send_tour(bot, chat_id: int, tour: dict):
     text, image = format_tour(tour)
     if not image:
         return
-    if is_sent(tour):
-        return
     try:
         if image.startswith("http"):
             await bot.send_photo(chat_id=chat_id, photo=image, caption=text, parse_mode="HTML")
@@ -563,7 +572,6 @@ async def _send_tour(bot, chat_id: int, tour: dict):
         await bot.send_message(
             chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True
         )
-    mark_sent(tour)
 
 
 def _dedup_tours(tours: list) -> list:
@@ -715,27 +723,6 @@ def main():
     async def on_startup(app):
         scheduler.start()
         logger.info(f"⏰ Планировщик: каждые {config.CHECK_INTERVAL_MINUTES} мин")
-        await asyncio.sleep(5)
-        for cid in get_active_users():
-            try:
-                s = get_settings(cid)
-                interval = s.get("interval_min", config.CHECK_INTERVAL_MINUTES)
-                if interval >= 1440:
-                    interval_str = f"{interval // 1440} дн."
-                elif interval >= 60:
-                    interval_str = f"{interval // 60} ч."
-                else:
-                    interval_str = f"{interval} мин."
-                await app.bot.send_message(
-                    cid,
-                    f"🤖 Бот запущен!\n\n"
-                    f"📍 Вылет из Таллина → Египет\n"
-                    f"🔍 Проверяю Delfiin.eu\n"
-                    f"⏱ Автопроверка каждые {interval_str}",
-                    reply_markup=main_keyboard(cid)
-                )
-            except Exception:
-                pass
         await run_check(app=app, notify_users=True)
 
     async def on_shutdown(app):

@@ -224,7 +224,11 @@ def fmt_settings(s: dict) -> str:
     days_val = int(s.get("days_filter", 60))
 
     chains_val = s.get("chains_filter", "any")
-    chains_str = "🏨 Любая сеть" if chains_val == "any" else f"🏨 {chains_val.replace(',', ', ')}"
+    if chains_val == "any":
+        chains_str = "🏨 Любая сеть"
+    else:
+        chains_list = ", ".join(c.strip().capitalize() for c in chains_val.split(","))
+        chains_str = f"🏨 <b>{chains_list}</b>"
 
     return (
         f"⚙️ <b>Мои настройки</b>\n\n"
