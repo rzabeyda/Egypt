@@ -13,7 +13,6 @@ SITE = "https://www.delfiin.ee"
 # URL шаблоны: /ru/sooduspakkumised/egiptus_hurghada/DDMMННН/TIMESTAMP/
 # Парсим индекс и берём все рейсы с нужным кол-вом ночей
 EGYPT_PAGES = [
-    ("Египет",        f"{SITE}/ru/sooduspakkumised"),
     ("Хургада",       f"{SITE}/ru/sooduspakkumised/egiptus_hurghada"),
     ("Шарм-эль-Шейх", f"{SITE}/ru/sooduspakkumised/egiptus_sharm_el_sheikh"),
     ("Марса-Алам",    f"{SITE}/ru/sooduspakkumised/egiptus_el_alamein"),
@@ -73,26 +72,31 @@ def fetch_delfiin() -> list:
 
     logger.info(f"Delfiin итого: {len(unique_tours)} туров (было {len(all_tours)} с дублями)")
 
-    # Картинки из папки images/ — файл называется по названию отеля
-    images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
-    os.makedirs(images_dir, exist_ok=True)
-
-    def _find_local_image(hotel_name: str) -> str:
-        if not os.path.isdir(images_dir):
-            return ""
-        def normalize(s):
-            return re.sub(r'[^a-z0-9]', '', s.lower())
-        target = normalize(hotel_name)
-        for fname in os.listdir(images_dir):
-            name_part = normalize(os.path.splitext(fname)[0])
-            if name_part == target or name_part in target or target in name_part:
-                return os.path.join(images_dir, fname)
-        return ""
-
+    # Картинки: берём из кэша БД, новые грузим максимум 20 штук за раз
+    hotel_image_cache = {}
+    new_fetches = 0
     for t in unique_tours:
-        hotel = t.get("hotel", "")
-        if hotel:
-            t["image"] = _find_local_image(hotel)
+        url = t.get("url", "")
+        if not url:
+            continue
+        if url in hotel_image_cache:
+            t["image"] = hotel_image_cache[url]
+            continue
+        try:
+            from database import get_cached_image
+            cached = get_cached_image(url)
+        except Exception:
+            cached = None
+        if cached is not None:
+            hotel_image_cache[url] = cached
+            t["image"] = cached
+        elif new_fetches < 20:
+            img = _get_hotel_image(session, url)
+            hotel_image_cache[url] = img
+            t["image"] = img
+            new_fetches += 1
+        else:
+            t["image"] = ""
 
     return unique_tours
 
@@ -310,14 +314,17 @@ def _parse_rows(container, dep_date, nights, destination, return_date, tours, se
 
 
 def _get_hotel_image(session, hotel_url: str) -> str:
-    """Берёт картинку отеля со страницы showhotel.php — с кэшем в БД."""
+    """Берёт картинку отеля с hoteldesc.php — с кэшем в БД."""
     try:
         from database import get_cached_image, cache_image
         cached = get_cached_image(hotel_url)
         if cached is not None:
             return cached
 
-        resp = session.get(hotel_url, timeout=15)
+        # Меняем showhotel.php на hoteldesc.php
+        desc_url = hotel_url.replace("showhotel.php", "hoteldesc.php")
+
+        resp = session.get(desc_url, timeout=15)
         if resp.status_code != 200:
             cache_image(hotel_url, "")
             return ""
@@ -325,47 +332,22 @@ def _get_hotel_image(session, hotel_url: str) -> str:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Ищем первую картинку отеля
-        img = None
-        # 1) Явный класс hotel-photo
-        img = soup.find("img", class_="hotel-photo")
-        # 2) Галерея tinybox
-        if not img or not img.get("src"):
-            tinybox = soup.find("div", class_="tinybox")
-            if tinybox:
-                img = tinybox.find("img")
-        # 3) Галерея galleria
-        if not img or not img.get("src"):
-            galleria = soup.find(id="galleria") or soup.find("div", class_="galleria")
-            if galleria:
-                img = galleria.find("img")
-        # 4) Любая img с ключевыми словами в src
-        if not img or not img.get("src"):
-            img = soup.find("img", src=re.compile(r'hotels?|foto|photo|gallery|galerii', re.I))
-        # 5) Первая img достаточно большая (width > 200 или без атрибута)
-        if not img or not img.get("src"):
-            for candidate in soup.find_all("img", src=True):
-                src = candidate.get("src", "")
-                if not src or "logo" in src.lower() or "icon" in src.lower() or "flag" in src.lower():
-                    continue
-                w = candidate.get("width")
-                try:
-                    if w and int(w) < 100:
-                        continue
-                except Exception:
-                    pass
-                img = candidate
-                break
-
         image_url = ""
-        if img:
-            src = img["src"]
+        for img in soup.find_all("img", src=True):
+            src = img.get("src", "")
+            if not src:
+                continue
+            # Пропускаем иконки
+            if any(x in src.lower() for x in ["tezhoverd", "icon", "logo", "flag"]):
+                continue
             if src.startswith("http"):
                 image_url = src
-            elif src.startswith("/"):
-                image_url = SITE + src
+            else:
+                image_url = SITE + "/" + src.lstrip("/")
+            break
 
         cache_image(hotel_url, image_url)
+        logger.debug(f"Картинка {hotel_url}: {image_url[:60] if image_url else 'не найдена'}")
         return image_url
     except Exception as e:
         logger.debug(f"Картинка {hotel_url}: {e}")

@@ -196,7 +196,7 @@ def fmt_settings(s: dict) -> str:
         "any":    "🍴 Любое питание",
     }
     city_labels = {
-        "all": "🏙 Все города",
+        "all": "Хургада, Шарм",
         "hrg": "🌊 Хургада",
         "ssh": "🏔 Шарм-эль-Шейх",
     }
@@ -210,10 +210,16 @@ def fmt_settings(s: dict) -> str:
         interval_str = f"{interval} мин."
 
     price_ranges = s.get("price_ranges", "any")
+    price_min = int(s.get("price_min", 0))
+    price_max = int(s.get("price_max", 9999))
     if price_ranges == "any":
         price_str = "любая"
     else:
-        price_str = price_ranges.replace(",", ", ").replace("0-299", "до 299€").replace("300-499", "300–499€").replace("500-799", "500–799€").replace("800-9999", "800€+")
+        price_str = price_ranges.replace(",", ", ")\
+            .replace("0-299", "до 299€")\
+            .replace("300-499", "300–499€")\
+            .replace("500-699", "500–699€")\
+            .replace("700-9999", "700€+")
 
     days_val = int(s.get("days_filter", 60))
 

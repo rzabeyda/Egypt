@@ -23,6 +23,7 @@ from database import (
     init_db, add_user, remove_user, get_active_users,
     get_recent_tours,
     get_settings, set_setting, reset_settings,
+    is_sent, mark_sent,
 )
 from filters import passes_filters
 from formatter import format_tour, fmt_start, fmt_status, fmt_settings
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 last_check_time = "ещё не проверял"
 total_sent = 0
+WAITING_PRICE = {}  # chat_id: True — ждём ввода цены
 
 
 # ══════════════════════════════════════════════════════════════
@@ -144,12 +146,11 @@ def kb_stars() -> InlineKeyboardMarkup:
 
 
 def kb_price(current: str = "any") -> InlineKeyboardMarkup:
-    """current — строка через запятую из выбранных диапазонов, напр. '300-499,500-799'"""
     ranges = [
         ("0-299",    "до 299€"),
         ("300-499",  "300–499€"),
-        ("500-799",  "500–799€"),
-        ("800-9999", "800€+"),
+        ("500-699",  "500–699€"),
+        ("700-9999", "700€+"),
     ]
     selected = set(current.split(",")) if current != "any" else set()
     rows = []
@@ -240,6 +241,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     s = get_settings(chat_id)
     user_tours = [t for t in all_tours if passes_filters(t, s)]
     if user_tours:
+        user_tours = _dedup_tours(user_tours)
         user_tours.sort(key=lambda t: t.get("price", 0), reverse=True)
         for tour in user_tours:
             await _send_tour(ctx.bot, chat_id, tour)
@@ -288,6 +290,31 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text
 
+    # Обработка ввода цены вручную
+    if WAITING_PRICE.get(chat_id):
+        WAITING_PRICE.pop(chat_id, None)
+        import re as _re
+        nums = _re.findall(r'\d+', text)
+        if len(nums) >= 2:
+            pmin, pmax = int(nums[0]), int(nums[1])
+        elif len(nums) == 1:
+            pmin, pmax = 0, int(nums[0])
+        else:
+            await update.message.reply_text("❌ Не понял. Введи например: 300 700")
+            return
+        set_setting(chat_id, "price_min", pmin)
+        set_setting(chat_id, "price_max", pmax)
+        set_setting(chat_id, "price_ranges", f"{pmin}-{pmax}")
+        s = get_settings(chat_id)
+        s["chat_id"] = chat_id
+        label = f"{pmin}–{pmax}€" if pmin > 0 else f"до {pmax}€"
+        await update.message.reply_text(
+            f"✅ Цена: {label}\n\n" + fmt_settings(s),
+            parse_mode="HTML",
+            reply_markup=kb_settings(chat_id)
+        )
+        return
+
     if text == "⚙️ Фильтры":
         s = get_settings(chat_id)
         s["chat_id"] = chat_id
@@ -313,6 +340,7 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         s = get_settings(chat_id)
         user_tours = [t for t in all_tours if passes_filters(t, s)]
         if user_tours:
+            user_tours = _dedup_tours(user_tours)
             user_tours.sort(key=lambda t: t.get("price", 0), reverse=True)
             for tour in user_tours:
                 await _send_tour(ctx.bot, chat_id, tour)
@@ -371,12 +399,22 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "price_manual":
+        WAITING_PRICE[chat_id] = True
+        await query.message.edit_text(
+            "✏️ <b>Введи диапазон цены</b>\n\nФормат: <code>от до</code>\nПример: <code>300 700</code>",
+            parse_mode="HTML"
+        )
+        return
+
     if data.startswith("price_toggle_"):
         key = data.replace("price_toggle_", "")
         s = get_settings(chat_id)
         current = s.get("price_ranges", "any")
         if key == "any":
             new_val = "any"
+            set_setting(chat_id, "price_min", 0)
+            set_setting(chat_id, "price_max", 9999)
         else:
             selected = set(current.split(",")) if current != "any" else set()
             if key in selected:
@@ -387,30 +425,16 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         set_setting(chat_id, "price_ranges", new_val)
         label = "любая" if new_val == "any" else new_val.replace(",", ", ")
         await query.message.edit_text(
-            f"✅ Цена: {label}\n\nМожно выбрать несколько диапазонов:",
+            f"✅ Цена: {label}\n\nВыбери диапазон:",
             parse_mode="HTML", reply_markup=kb_price(new_val)
         )
         return
 
-    if data.startswith("price_range_"):
-        parts = data.split("_")
-        rmin, rmax = int(parts[2]), int(parts[3])
-        set_setting(chat_id, "price_min", rmin)
-        set_setting(chat_id, "price_max", rmax)
-        if rmax == 9999 and rmin == 0:
-            label = "без лимита"
-        elif rmax == 9999:
-            label = f"от {rmin}€"
-        elif rmin == 0:
-            label = f"до {rmax}€"
-        else:
-            label = f"{rmin}–{rmax}€"
-        s = get_settings(chat_id)
-        await query.message.edit_text(
-            f"✅ Цена: {label}\n\nВыбери диапазон цены / чел:",
-            parse_mode="HTML",
-            reply_markup=kb_price(s.get("price_ranges", "any"))
-        )
+    if data == "price_toggle_any":
+        set_setting(chat_id, "price_ranges", "any")
+        set_setting(chat_id, "price_min", 0)
+        set_setting(chat_id, "price_max", 9999)
+        await _back_settings(query, chat_id, "✅ Цена: любая")
         return
 
     if data == "menu_stars":
@@ -523,25 +547,44 @@ async def _back_settings(query, chat_id: int, notice: str):
 
 async def _send_tour(bot, chat_id: int, tour: dict):
     text, image = format_tour(tour)
-    if image:
-        try:
-            if image.startswith("http"):
-                await bot.send_photo(chat_id=chat_id, photo=image, caption=text, parse_mode="HTML")
+    if not image:
+        return
+    if is_sent(tour):
+        return
+    try:
+        if image.startswith("http"):
+            await bot.send_photo(chat_id=chat_id, photo=image, caption=text, parse_mode="HTML")
+        else:
+            import os
+            if os.path.isfile(image):
+                with open(image, "rb") as f:
+                    await bot.send_photo(chat_id=chat_id, photo=f, caption=text, parse_mode="HTML")
+    except Exception:
+        await bot.send_message(
+            chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True
+        )
+    mark_sent(tour)
+
+
+def _dedup_tours(tours: list) -> list:
+    """Дедупликация по отель+дата. Предпочитаем тур с картинкой."""
+    import re as _re
+    def base_name(hotel):
+        return _re.sub(r'\s*\(\d+[*★][^)]*\).*', '', hotel).strip().lower()
+
+    best = {}
+    for t in tours:
+        key = f"{base_name(t.get('hotel',''))}|{t.get('departure_date','')}|{t.get('destination','')}"
+        if key not in best:
+            best[key] = t
+        else:
+            if t.get("image") and not best[key].get("image"):
+                logger.info(f"DEDUP заменяем на с картинкой: {t.get('hotel')}")
+                best[key] = t
             else:
-                import os
-                if os.path.isfile(image):
-                    with open(image, "rb") as f:
-                        await bot.send_photo(chat_id=chat_id, photo=f, caption=text, parse_mode="HTML")
-                    return
-        except Exception:
-            pass
-    await bot.send_message(
-        chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True
-    )
-
-
-# ══════════════════════════════════════════════════════════════
-#  СКРАПЕРЫ
+                logger.info(f"DEDUP убираем дубль: {t.get('hotel')} {t.get('departure_date')}")
+    logger.info(f"DEDUP: {len(tours)} → {len(best)} туров")
+    return list(best.values())
 # ══════════════════════════════════════════════════════════════
 
 SCRAPERS = [
@@ -594,6 +637,7 @@ async def run_check(app=None, notify_users=True) -> list:
             s = get_settings(chat_id)
             user_tours = [t for t in all_tours if passes_filters(t, s)]
             if user_tours:
+                user_tours = _dedup_tours(user_tours)
                 total_sent += len(user_tours)
                 for tour in user_tours:
                     try:
