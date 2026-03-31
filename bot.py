@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 last_check_time = "ещё не проверял"
 total_sent = 0
 WAITING_PRICE = {}  # chat_id: True — ждём ввода цены
+_last_notified: dict = {}  # chat_id -> datetime последней рассылки
+
+# Глобальная ссылка на app для планировщика
+_app = None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -53,7 +57,7 @@ def main_keyboard(chat_id: int) -> ReplyKeyboardMarkup:
     toggle_label = "🔕 Выключить" if active else "🔔 Включить"
     return ReplyKeyboardMarkup(
         [[
-            KeyboardButton("🔍 Искать туры"),
+            KeyboardButton("🔍 Искать"),
             KeyboardButton("⚙️ Фильтры"),
             KeyboardButton(toggle_label),
         ]],
@@ -69,7 +73,7 @@ def main_keyboard(chat_id: int) -> ReplyKeyboardMarkup:
 def kb_settings(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔔 Спам",    callback_data="menu_interval"),
+            InlineKeyboardButton("🔔 Рассылка", callback_data="menu_interval"),
             InlineKeyboardButton("🏙 Город",   callback_data="menu_city"),
             InlineKeyboardButton("📅 Вылет",   callback_data="menu_days"),
         ],
@@ -79,9 +83,9 @@ def kb_settings(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🍽 Питание", callback_data="menu_meal"),
         ],
         [
-            InlineKeyboardButton("🏨 Отели",       callback_data="menu_chains"),
-            InlineKeyboardButton("🔄 Сброс",        callback_data="reset_filters"),
-            InlineKeyboardButton("🔍 Поиск",         callback_data="search_now"),
+            InlineKeyboardButton("🏨 Отели",   callback_data="menu_chains"),
+            InlineKeyboardButton("🔄 Сброс",   callback_data="reset_filters"),
+            InlineKeyboardButton("🔍 Поиск",   callback_data="search_now"),
         ],
     ])
 
@@ -289,7 +293,6 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text
 
-    # Обработка ввода цены вручную
     if WAITING_PRICE.get(chat_id):
         WAITING_PRICE.pop(chat_id, None)
         import re as _re
@@ -333,7 +336,7 @@ async def on_text_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "🔕 Рассылка выключена.", reply_markup=main_keyboard(chat_id)
         )
 
-    elif text == "🔍 Искать туры":
+    elif text == "🔍 Искать":
         await update.message.reply_text("🤖 Ищу предложения на delfiin.eu, подождите!")
         all_tours = await fetch_all_tours()
         s = get_settings(chat_id)
@@ -374,17 +377,20 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             user_tours = _dedup_tours(user_tours)
             user_tours.sort(key=lambda t: t.get("price", 0))
             for tour in user_tours:
-                await _send_tour(query.message.bot, chat_id, tour, force=True)
+                await _send_tour(query.message.bot, chat_id, tour)
         else:
             await query.message.reply_text("😕 Туров по вашим фильтрам сейчас нет.")
         return
+
+    # ✅ ИСПРАВЛЕНО: reset_filters был недоступен из-за return выше
+    if data == "reset_filters":
         reset_settings(chat_id)
         await _back_settings(query, chat_id, "🔄 Фильтры сброшены до стандартных!")
         return
 
     if data == "menu_interval":
         await query.message.edit_text(
-            "⏱ <b>Частота рассылки (Спам)</b>\n\nКак часто проверять и присылать новые туры?",
+            "⏱ <b>Частота рассылки</b>\n\nКак часто проверять и присылать новые туры?",
             parse_mode="HTML", reply_markup=kb_interval()
         )
         return
@@ -558,16 +564,14 @@ async def _back_settings(query, chat_id: int, notice: str):
 
 async def _send_tour(bot, chat_id: int, tour: dict):
     text, image = format_tour(tour)
-    if not image:
-        return
     try:
-        if image.startswith("http"):
+        if image and image.startswith("http"):
             await bot.send_photo(chat_id=chat_id, photo=image, caption=text, parse_mode="HTML")
+        elif image and os.path.isfile(image):
+            with open(image, "rb") as f:
+                await bot.send_photo(chat_id=chat_id, photo=f, caption=text, parse_mode="HTML")
         else:
-            import os
-            if os.path.isfile(image):
-                with open(image, "rb") as f:
-                    await bot.send_photo(chat_id=chat_id, photo=f, caption=text, parse_mode="HTML")
+            raise ValueError("no image")
     except Exception:
         await bot.send_message(
             chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True
@@ -575,7 +579,6 @@ async def _send_tour(bot, chat_id: int, tour: dict):
 
 
 def _dedup_tours(tours: list) -> list:
-    """Дедупликация по отель+дата. Предпочитаем тур с картинкой."""
     import re as _re
     def base_name(hotel):
         return _re.sub(r'\s*\(\d+[*★][^)]*\).*', '', hotel).strip().lower()
@@ -587,13 +590,10 @@ def _dedup_tours(tours: list) -> list:
             best[key] = t
         else:
             if t.get("image") and not best[key].get("image"):
-                logger.info(f"DEDUP заменяем на с картинкой: {t.get('hotel')}")
                 best[key] = t
-            else:
-                logger.info(f"DEDUP убираем дубль: {t.get('hotel')} {t.get('departure_date')}")
     logger.info(f"DEDUP: {len(tours)} → {len(best)} туров")
     return list(best.values())
-# ══════════════════════════════════════════════════════════════
+
 
 SCRAPERS = [
     ("Delfiin", fetch_delfiin),
@@ -601,7 +601,6 @@ SCRAPERS = [
 
 
 async def fetch_all_tours() -> list:
-    """Все туры для кнопки Проверить и /start."""
     loop = asyncio.get_event_loop()
     results = await asyncio.gather(
         *[loop.run_in_executor(None, fn) for _, fn in SCRAPERS],
@@ -617,7 +616,6 @@ async def fetch_all_tours() -> list:
 
 
 async def run_check(app=None, notify_users=True) -> list:
-    """Периодическая проверка (по расписанию)."""
     global last_check_time, total_sent
     last_check_time = datetime.now().strftime("%d.%m.%Y %H:%M")
     logger.info(f"▶️  Проверка [{last_check_time}]")
@@ -638,15 +636,34 @@ async def run_check(app=None, notify_users=True) -> list:
 
     logger.info(f"Итого до фильтра: {len(all_tours)}")
 
-    logger.info(f"✅ Всего туров: {len(all_tours)}")
-
     if notify_users and app:
+        now = datetime.now()
         for chat_id in get_active_users():
             s = get_settings(chat_id)
+            interval = int(s.get("interval_min", config.CHECK_INTERVAL_MINUTES))
+
+            # ✅ ИСПРАВЛЕНО: проверяем прошёл ли интервал для этого пользователя
+            last = _last_notified.get(chat_id)
+            if last is not None:
+                elapsed_min = (now - last).total_seconds() / 60
+                if elapsed_min < interval:
+                    logger.info(f"Юзер {chat_id} — пропускаем, прошло {elapsed_min:.0f}/{interval} мин")
+                    continue
+                logger.info(f"Юзер {chat_id} — прошло {elapsed_min:.0f} мин, шлём")
+
             user_tours = [t for t in all_tours if passes_filters(t, s)]
             if user_tours:
                 user_tours = _dedup_tours(user_tours)
+                _last_notified[chat_id] = now
                 total_sent += len(user_tours)
+
+                if interval >= 1440:
+                    interval_str = f"{interval // 1440} дн."
+                elif interval >= 60:
+                    interval_str = f"{interval // 60} ч."
+                else:
+                    interval_str = f"{interval} мин."
+
                 for tour in user_tours:
                     try:
                         await _send_tour(app.bot, chat_id, tour)
@@ -654,37 +671,17 @@ async def run_check(app=None, notify_users=True) -> list:
                     except Exception as e:
                         logger.error(f"Ошибка отправки {chat_id}: {e}")
                 try:
-                    interval = s.get("interval_min", config.CHECK_INTERVAL_MINUTES)
-                    if interval >= 1440:
-                        interval_str = f"{interval // 1440} дн."
-                    elif interval >= 60:
-                        interval_str = f"{interval // 60} ч."
-                    else:
-                        interval_str = f"{interval} мин."
                     await app.bot.send_message(
                         chat_id,
-                        f"✅ Проверка завершена — найдено {len(user_tours)} тур(ов) по вашим фильтрам.\n"
-                        f"⏱ Следующая проверка через {interval_str}"
+                        f"✅ Найдено {len(user_tours)} тур(ов) по вашим фильтрам.\n"
+                        f"⏱ Следующая рассылка через {interval_str}"
                     )
                 except Exception:
                     pass
             else:
-                try:
-                    interval = s.get("interval_min", config.CHECK_INTERVAL_MINUTES)
-                    if interval >= 1440:
-                        interval_str = f"{interval // 1440} дн."
-                    elif interval >= 60:
-                        interval_str = f"{interval // 60} ч."
-                    else:
-                        interval_str = f"{interval} мин."
-                    await app.bot.send_message(
-                        chat_id,
-                        f"🔍 Проверил Delfiin — {len(all_tours)} предложений.\n"
-                        f"По вашим фильтрам ничего не найдено.\n"
-                        f"⏱ Следующая проверка через {interval_str}"
-                    )
-                except Exception:
-                    pass
+                logger.info(f"Юзер {chat_id}: туров по фильтрам нет")
+                # Если прошёл интервал но туров нет — всё равно обновляем таймер
+                _last_notified[chat_id] = now
 
     return all_tours
 
@@ -694,10 +691,12 @@ async def run_check(app=None, notify_users=True) -> list:
 # ══════════════════════════════════════════════════════════════
 
 def main():
+    global _app
     init_db()
     logger.info("✅ БД готова")
 
     app = Application.builder().token(config.TELEGRAM_TOKEN).build()
+    _app = app
 
     app.add_handler(CommandHandler("start",  cmd_start))
     app.add_handler(CommandHandler("stop",   cmd_stop))
@@ -708,8 +707,13 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
 
     scheduler = AsyncIOScheduler()
+
+    # ✅ ИСПРАВЛЕНО: используем async def вместо lambda с ensure_future
+    async def scheduled_check():
+        await run_check(app=app, notify_users=True)
+
     scheduler.add_job(
-        lambda: asyncio.ensure_future(run_check(app=app, notify_users=True)),
+        scheduled_check,
         trigger="interval",
         minutes=config.CHECK_INTERVAL_MINUTES,
         id="check",
@@ -732,12 +736,6 @@ def main():
     app.post_shutdown = on_shutdown
 
     logger.info("🤖 Бот запущен!")
-
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    except Exception:
-        pass
 
     app.run_polling(drop_pending_updates=False)
 

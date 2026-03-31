@@ -141,8 +141,8 @@ def format_tour(tour: dict) -> tuple:
     if seats is not None:
         try:
             sv = int(seats)
-            emoji = "😰" if sv <= 3 else "😐" if sv <= 6 else "🙂"
-            lines.append(f"{emoji} Мест в самолёте: <b>{seats}</b>")
+            emoji = "😰" if sv <= 3 else "👤" if sv <= 6 else "👤"
+            lines.append(f"{emoji} Мест: <b>{seats}</b>")
         except:
             pass
 
@@ -231,8 +231,8 @@ def fmt_settings(s: dict) -> str:
         chains_str = f"🏨 <b>{chains_list}</b>"
 
     return (
-        f"⚙️ <b>Мои настройки</b>\n\n"
-        f"⏱ Частота: <b>{interval_str}</b>\n"
+        f"⚙️ <b>Настройки фильтров</b>\n\n"
+        f"⏱ Частота уведомлений: <b>{interval_str}</b>\n"
         f"🏙 Город: <b>{city_labels.get(s.get('city_filter', 'all'), 'Все')}</b>\n"
         f"📅 Вылет: <b>в ближайшие {days_val} дней</b>\n"
         f"💰 Цена: <b>{price_str}</b> / чел\n"
