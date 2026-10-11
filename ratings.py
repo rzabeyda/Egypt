@@ -6,7 +6,7 @@ HOTEL_RATINGS = {
     "barceló tiran sharm":       7.9,
     "pickalbatros luxury suites":9.5,
     "jaz neo naama bay":         8.6,
-    "jaz neo sharks bay":        8.4,
+    "jaz neo sharks bay":        8.8,
     "hawaii riviera":            7.6,
     "minamark":                  7.6,
     "regency plaza":             7.8,
@@ -99,7 +99,109 @@ HOTEL_RATINGS = {
     "jaz soma beach":            9.4,
     "titanic deluxe sharm":      9.4,
     "oberoi beach":              9.6,
+
+    # добавлено из egypt_real_hotels.csv (оценки ориентировочные, не перезаписывают таблицу выше)
+    "amc royal":                 8.5,
+    "aladdin beach":             8.4,
+    "aurora oriental":           8.3,
+    "iberotel palace":           9.1,
+    "nubian island":             8.7,
+    "nubian village":            8.6,
+    "palm beach resort":         8.2,
+    "parrotel beach resort":     8.4,
+    "pharaoh azur":              8.3,
+    "sharm cliff":               8.0,
+    "sharming inn":              8.2,
+    "sheraton sharm":            8.5,
+    "sierra":                    8.8,
+    "stella di mare beach":      9.3,
+    "grand resort hurghada":     8.3,
+    "turquoise beach":           8.1,
+    "xperience sea breeze":      8.9,
+
+    # добавлено вручную (Booking), по списку отелей без рейтинга
+    "white hills sharm el sheikh - posh club":9.4,
+    "white hills":                            9.2,
+    "viva sharm":                             8.1,
+    "coral hills":                            8.0,
+    "jaz dahabeya":                           8.8,
+    "eden rock":                              7.9,
+    "magic life redsina":                     9.3,
+    "xperience saint george":                 8.4,
+    "happy life village":                     8.3,
+    "retac qunay":                            8.2,
+    "romance regency":                        8.9,
+    "v hotel sharm":                          9.0,
+    "megan halomy":                           7.6,
+    "jaz elite palace":                       9.1,
+    "parrotel lagoon":                        8.6,
+    "amphoras beach":                         8.5,
+    "dexon roma":                             7.5,
+    "faraana heights":                        8.1,
+    "sand beach":                             7.4,
+    "el khan sharm":                          8.2,
+    "invidia coral beach":                    8.3,
+    "fiord club":                             8.0,
+    "swiss inn resort":                       8.7,
+    "ecotel dahab":                           8.1,
+    "time coral nuweiba":                     8.0,
+    "viking club":                            7.8,
+    "sharm plaza":                            8.3,
+    "strand beach":                           9.1,
+    "bay view resort taba":                   8.4,
+    "rosetta hotel":                          8.2,
+    "dive inn resort":                        8.5,
+    "dahab lagoon":                           8.6,
+    "novotel palm":                           8.9,
+    "sun & sea hotel hurghada":               7.5,
+    "ivy cyrene":                             8.2,
+    "marina sharm":                           8.6,
+    "falcon hills":                           8.0,
+    "falcon naama star":                      7.9,
+    "lido sharm":                             8.8,
+    "safir dahab":                            8.9,
+    "mazar resort":                           7.9,
+    "siva sharm":                             8.5,
+    "ghazala garden":                         8.3,
+    "sharm reef":                             8.2,
+    "oriental rivoli":                        8.4,
+    "sharm grand plaza":                      8.5,
+    "faraana reef":                           8.4,
+    "club reef":                              8.3,
+    "cataract layalina":                      7.8,
+    "tamra beach":                            8.5,
+    "jaz fayrouz":                            8.9,
 }
+
+
+_TOP_INDEX = None
+
+
+def _norm(s: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9 ]", "", s.lower().replace("é", "e").replace("ô", "o"))
+
+
+def _top_rating(hotel_name: str):
+    """Рейтинг из списка топ-отелей (top_hotels.py), если нет в таблице выше."""
+    global _TOP_INDEX
+    import re
+    if _TOP_INDEX is None:
+        try:
+            from top_hotels import TOP_HOTELS
+            _TOP_INDEX = {
+                _norm(re.sub(r"\s*\(.*", "", n)): r
+                for lst in TOP_HOTELS.values() for n, _s, r in lst
+            }
+        except Exception:
+            _TOP_INDEX = {}
+    n = _norm(re.sub(r"\s*\(.*", "", hotel_name))
+    if n in _TOP_INDEX:
+        return _TOP_INDEX[n]
+    for k, v in _TOP_INDEX.items():
+        if len(k) > 6 and (k in n or n in k):
+            return v
+    return None
 
 
 def get_rating(hotel_name: str):
@@ -108,6 +210,9 @@ def get_rating(hotel_name: str):
     for key, rating in HOTEL_RATINGS.items():
         if key in name:
             return rating, None
+    top = _top_rating(hotel_name)
+    if top:
+        return top, None
     name_words = set(name.split())
     best_match = None
     best_count = 1

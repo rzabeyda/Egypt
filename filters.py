@@ -66,9 +66,9 @@ def is_within_days(departure_date: str, max_days: int) -> bool:
 
 
 def is_right_city(destination: str, city_filter: str) -> bool:
-    if city_filter == "all":
-        return True
     d = destination.lower()
+    if city_filter == "all":
+        return any(k in d for k in ["хургада", "hurghada", "hrg", "шарм", "sharm", "ssh"])
     if city_filter == "hrg":
         return any(k in d for k in ["хургада", "hurghada", "hrg"])
     if city_filter == "ssh":
@@ -90,6 +90,7 @@ def passes_filters(tour: dict, settings: dict = None) -> bool:
     meal_f    = settings.get("meal_filter",  "any")    if settings else "any"
     days_f    = int(settings.get("days_filter", 180))  if settings else 180
     chains_f  = settings.get("chains_filter", "any")   if settings else "any"
+    rating_f  = float(settings.get("rating_min", 0) or 0) if settings else 0.0
 
     price = tour.get("price", 0)
     if price <= 0:
@@ -129,8 +130,16 @@ def passes_filters(tour: dict, settings: dict = None) -> bool:
         log.info(f"ФИЛЬТР отель не в списке: {tour.get('hotel','')}")
         return False
 
-    if not _meal_matches(tour.get("meal_plan", ""), meal_f):
+    # питание всегда «все включено» (AI/UAI); если питание не указано — тур не режем
+    if not _meal_matches(tour.get("meal_plan", ""), "ai,uai"):
         return False
+
+    if rating_f > 0:
+        from ratings import get_rating
+        rating, _ = get_rating(tour.get("hotel", ""))
+        # у отеля нет рейтинга — не можем подтвердить, что он подходит
+        if not rating or rating < rating_f:
+            return False
 
     if not is_good_stars(tour.get("stars", 0), stars_min, stars_max):
         log.info(f"ФИЛЬТР звёзды: {tour.get('stars',0)} не в {stars_min}-{stars_max} | {tour.get('hotel','')}")
@@ -162,6 +171,12 @@ HOTEL_CHAINS = {
     "domina":       ["domina"],
     "baron":        ["baron"],
     "titanic":      ["titanic"],
+    "savoy":        ["savoy"],
+    "sunnydays":    ["sunny days", "sunnydays"],
+    "hawaii":       ["hawaii"],
+    "coral":        ["coral"],
+    "fourseasons":  ["four seasons", "fourseasons"],
+    "reef":         ["reef"],
 }
 
 

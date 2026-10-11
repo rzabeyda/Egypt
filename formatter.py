@@ -187,7 +187,7 @@ def fmt_status(users: int, last_check: str, total: int, interval_min: int = 30) 
 
 def fmt_settings(s: dict) -> str:
     meal_labels = {
-        "ai,uai": "🍽️ Все включено (AI + UAI)",
+        "ai,uai": "🍽️ Все включено",
         "ai":     "🍽️ Все включено",
         "uai":    "🍽️🍽️ Ультра все включено",
         "bb":     "🥐 Только завтраки",
@@ -210,16 +210,18 @@ def fmt_settings(s: dict) -> str:
         interval_str = f"{interval} мин."
 
     price_ranges = s.get("price_ranges", "any")
-    price_min = int(s.get("price_min", 0))
     price_max = int(s.get("price_max", 9999))
-    if price_ranges == "any":
-        price_str = "любая"
+    price_labels = {
+        "0-499": "0 – 500 €", "500-999": "500 – 1000 €",
+        "1000-9999": "1000+ €", "500-9999": "500+ €",
+    }
+    if price_ranges in price_labels:
+        price_str = price_labels[price_ranges]
+    elif price_ranges == "any":
+        # старые настройки: «любая» с потолком price_max
+        price_str = "любая цена" if price_max >= 9999 else f"до {price_max} €"
     else:
-        price_str = price_ranges.replace(",", ", ")\
-            .replace("0-299", "до 299€")\
-            .replace("300-499", "300–499€")\
-            .replace("500-699", "500–699€")\
-            .replace("700-9999", "700€+")
+        price_str = price_ranges.replace(",", ", ") + " €"
 
     days_val = int(s.get("days_filter", 60))
 
@@ -227,16 +229,19 @@ def fmt_settings(s: dict) -> str:
     if chains_val == "any":
         chains_str = "🏨 Любая сеть"
     else:
-        chains_list = ", ".join(c.strip().capitalize() for c in chains_val.split(","))
+        chain_names = {"sunnydays": "Sunny Days", "fourseasons": "Four Seasons", "barcelo": "Barceló", "pickalbatros": "Pickalbatros"}
+        chains_list = ", ".join(chain_names.get(c.strip(), c.strip().capitalize()) for c in chains_val.split(","))
         chains_str = f"🏨 <b>{chains_list}</b>"
+
+    rating_min = float(s.get("rating_min", 0) or 0)
+    rating_str = f"🏅 Рейтинг: <b>{rating_min:g}+</b>" if rating_min > 0 else "🏅 Рейтинг: <b>любой</b>"
 
     return (
         f"⚙️ <b>Настройки фильтров</b>\n\n"
         f"⏱ Частота уведомлений: <b>{interval_str}</b>\n"
-        f"🏙 Город: <b>{city_labels.get(s.get('city_filter', 'all'), 'Все')}</b>\n"
         f"📅 Вылет: <b>в ближайшие {days_val} дней</b>\n"
-        f"💰 Цена: <b>{price_str}</b> / чел\n"
+        f"💰 Цена: <b>{price_str}</b> за 1 человека\n"
         f"🌟 Звёзды: <b>{s.get('stars_min', 3)}★ — {s.get('stars_max', 5)}★</b>\n"
         f"{chains_str}\n"
-        f"{meal_labels.get(s.get('meal_filter', 'ai,uai'), '🍽️ AI')}"
+        f"{rating_str}"
     )

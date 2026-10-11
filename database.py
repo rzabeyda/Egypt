@@ -65,6 +65,26 @@ def init_db():
                 cached_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_sent (
+                chat_id INTEGER,
+                hash    TEXT,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (chat_id, hash)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notify_state (
+                chat_id INTEGER PRIMARY KEY,
+                last_at TEXT
+            )
+        """)
+        # первый запуск после обновления: не засыпать текущих подписчиков заново
+        if conn.execute("SELECT COUNT(*) FROM notify_state").fetchone()[0] == 0:
+            conn.execute("""
+                INSERT OR IGNORE INTO notify_state (chat_id, last_at)
+                SELECT chat_id, datetime('now') FROM users WHERE active=1
+            """)
         conn.commit()
     _migrate()
 
@@ -72,6 +92,7 @@ def init_db():
 def _migrate():
     migrations = [
         ("user_settings", "days_filter",  "INTEGER DEFAULT 14"),
+        ("user_settings", "rating_min",   "REAL DEFAULT 0"),
         ("user_settings", "interval_min", "INTEGER DEFAULT 360"),
         ("user_settings", "meal_filter",  "TEXT DEFAULT 'ai,uai'"),
         ("user_settings", "stars_min",    "INTEGER DEFAULT 4"),
@@ -122,6 +143,55 @@ def mark_sent(tour: dict):
             tour.get("nights",0), tour.get("departure_date",""),
             tour.get("url",""), tour.get("image",""),
         ))
+        conn.commit()
+
+
+def is_sent_to(chat_id: int, tour: dict) -> bool:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT 1 FROM user_sent WHERE chat_id=? AND hash=?",
+            (chat_id, tour_hash(tour)),
+        ).fetchone() is not None
+
+
+def mark_sent_to(chat_id: int, tour: dict):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO user_sent (chat_id, hash) VALUES (?,?)",
+            (chat_id, tour_hash(tour)),
+        )
+        conn.commit()
+
+
+def cleanup_user_sent(days: int = 30):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM user_sent WHERE sent_at < datetime('now', ? || ' days')",
+            (f"-{days}",),
+        )
+        conn.commit()
+
+
+def get_last_notified(chat_id: int):
+    from datetime import datetime
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT last_at FROM notify_state WHERE chat_id=?", (chat_id,)
+        ).fetchone()
+    if not row or not row["last_at"]:
+        return None
+    try:
+        return datetime.fromisoformat(row["last_at"])
+    except ValueError:
+        return None
+
+
+def set_last_notified(chat_id: int, dt):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO notify_state (chat_id,last_at) VALUES (?,?)",
+            (chat_id, dt.isoformat(sep=" ")),
+        )
         conn.commit()
 
 

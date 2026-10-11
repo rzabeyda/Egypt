@@ -15,7 +15,6 @@ SITE = "https://www.delfiin.ee"
 EGYPT_PAGES = [
     ("Хургада",       f"{SITE}/ru/sooduspakkumised/egiptus_hurghada"),
     ("Шарм-эль-Шейх", f"{SITE}/ru/sooduspakkumised/egiptus_sharm_el_sheikh"),
-    ("Марса-Алам",    f"{SITE}/ru/sooduspakkumised/egiptus_el_alamein"),
 ]
 
 MIN_NIGHTS   = 7
