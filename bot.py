@@ -5,6 +5,7 @@ Egypt Tour Bot
 
 import logging
 import asyncio
+import time
 import os
 from datetime import datetime
 
@@ -15,7 +16,10 @@ os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
 os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, MessageHandler, TypeHandler,
+    ApplicationHandlerStop, filters, ContextTypes,
+)
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.error import Forbidden, BadRequest
 
@@ -785,6 +789,35 @@ def main():
 
     app = Application.builder().token(config.TELEGRAM_TOKEN).concurrent_updates(True).build()
     _app = app
+
+    # защита от повторной обработки одного и того же апдейта (+ запись в журнал для диагностики)
+    _seen_ids: set = set()
+    _seen_order: list = []
+    _last_text: dict = {}
+
+    async def drop_duplicate_updates(update: Update, context):
+        uid = update.update_id
+        user = update.effective_user.id if update.effective_user else None
+        if uid in _seen_ids:
+            logger.warning(f"ДУБЛЬ апдейта {uid} от {user} — пропускаю")
+            raise ApplicationHandlerStop
+        _seen_ids.add(uid)
+        _seen_order.append(uid)
+        if len(_seen_order) > 1000:
+            _seen_ids.discard(_seen_order.pop(0))
+        msg = update.effective_message
+        text = (msg.text or "")[:30] if msg else ""
+        logger.info(f"апдейт {uid} от {user} msg={msg.message_id if msg else None} text={text!r}")
+        # двойное нажатие / повтор одного и того же текста из одного чата в течение 2 секунд
+        if update.message and update.message.text:
+            key = (update.effective_chat.id, update.message.text)
+            now_m = time.monotonic()
+            if now_m - _last_text.get(key, 0) < 2.0:
+                logger.warning(f"повтор текста {text!r} от {user} за <2 c — пропускаю")
+                raise ApplicationHandlerStop
+            _last_text[key] = now_m
+
+    app.add_handler(TypeHandler(Update, drop_duplicate_updates), group=-1)
 
     app.add_handler(CommandHandler("start",  cmd_start))
     app.add_handler(CommandHandler("stop",   cmd_stop))
