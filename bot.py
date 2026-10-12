@@ -4,6 +4,7 @@ Delfin Tour Bot
 """
 
 import logging
+from logging.handlers import RotatingFileHandler
 import asyncio
 import time
 import os
@@ -41,7 +42,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(config.LOG_PATH, encoding="utf-8"),
+        RotatingFileHandler(config.LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"),
     ],
 )
 # httpx пишет в INFO каждый getUpdates вместе с токеном в URL
