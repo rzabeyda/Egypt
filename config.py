@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============================================================
-#  EGYPT TOUR BOT — CONFIG
+#  DELFIN TOUR BOT — CONFIG
 # ============================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")

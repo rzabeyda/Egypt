@@ -162,7 +162,7 @@ def format_tour(tour: dict) -> tuple:
 
 def fmt_start() -> str:
     return (
-        "👋 <b>Egypt Tour Bot</b>\n\n"
+        "👋 <b>Delfin Tour Bot</b>\n\n"
         "Слежу за горящими турами в Египет.\n\n"
         "📍 Вылет из Таллина\n"
         "🏖 Хургада / Шарм-эль-Шейх\n\n"

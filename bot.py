@@ -1,5 +1,5 @@
 """
-Egypt Tour Bot
+Delfin Tour Bot
 Запуск: python bot.py
 """
 

@@ -100,7 +100,7 @@ HOTEL_RATINGS = {
     "titanic deluxe sharm":      9.4,
     "oberoi beach":              9.6,
 
-    # добавлено из egypt_real_hotels.csv (оценки ориентировочные, не перезаписывают таблицу выше)
+    # добавлено из файла с рейтингами Booking (оценки ориентировочные, не перезаписывают таблицу выше)
     "amc royal":                 8.5,
     "aladdin beach":             8.4,
     "aurora oriental":           8.3,
