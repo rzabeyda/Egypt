@@ -32,7 +32,7 @@ from database import (
     get_last_notified, set_last_notified,
 )
 from filters import passes_filters
-from formatter import format_tour, fmt_start, fmt_status, fmt_settings
+from formatter import format_tour, fmt_start, fmt_status, fmt_settings, price_label
 from delfiin import fetch_delfiin
 from top_hotels import TOP_HOTELS
 
@@ -135,15 +135,38 @@ def kb_stars(mn: int = 0, mx: int = 0) -> InlineKeyboardMarkup:
     ])
 
 
+PRICE_KEYS = ("0-499", "500-999", "1000-9999")
+PRICE_MENU_TEXT = (
+    "💰 <b>Цена за 1 человека</b>\n"
+    "<i>при условии, что в номере проживают 2 человека</i>\n\n"
+    "Можно выбрать несколько вариантов"
+)
+
+
+def _price_set(current: str) -> set:
+    """Выбранные диапазоны цены как множество ключей (старые значения приводим к новым)."""
+    if not current or current == "any":
+        return set()
+    out = set()
+    for k in current.split(","):
+        k = k.strip()
+        if k == "500-9999":            # старое «500+ €» = два нынешних диапазона
+            out.update({"500-999", "1000-9999"})
+        elif k in PRICE_KEYS:
+            out.add(k)
+    return out
+
+
 def kb_price(current: str = "any", price_max: int = 9999) -> InlineKeyboardMarkup:
-    # старые настройки: «any» с потолком price_max — ни один пункт не отмечаем
-    sel = "legacy" if (current == "any" and price_max < 9999) else current
+    selected = _price_set(current)
+    any_on = (not current or current == "any") and price_max >= 9999
+
     def b(label, key):
-        tick = "✅ " if sel == key else ""
+        tick = "✅ " if key in selected else ""
         return InlineKeyboardButton(f"{tick}{label}", callback_data=f"price_toggle_{key}")
     return InlineKeyboardMarkup([
         [b("0 – 500 €", "0-499"), b("500 – 1000 €", "500-999"), b("1000+ €", "1000-9999")],
-        [b("Любая цена", "any")],
+        [InlineKeyboardButton(("✅ " if any_on else "") + "Любая цена", callback_data="price_toggle_any")],
         [InlineKeyboardButton("◀️ Назад", callback_data="settings")],
     ])
 
@@ -472,8 +495,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         s = get_settings(chat_id)
         current = s.get("price_ranges", "any")
         await query.message.edit_text(
-            "💰 <b>Цена за 1 человека</b>\n"
-            "<i>при условии, что в номере проживают 2 человека</i>",
+            PRICE_MENU_TEXT + f"\n\n✅ Сейчас: <b>{price_label(current, int(s.get('price_max', 9999)))}</b>",
             parse_mode="HTML",
             reply_markup=kb_price(current, int(s.get("price_max", 9999)))
         )
@@ -489,12 +511,20 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("price_toggle_"):
         key = data.replace("price_toggle_", "")
+        s = get_settings(chat_id)
         if key == "any":
+            new_val = "any"
+        else:
+            selected = _price_set(s.get("price_ranges", "any")) ^ {key}
+            new_val = ",".join(sorted(selected, key=lambda k: int(k.split("-")[0]))) if selected else "any"
+        if new_val == "any":
             set_setting(chat_id, "price_min", 0)
             set_setting(chat_id, "price_max", 9999)
-        set_setting(chat_id, "price_ranges", key)
-        labels = {"any": "любая цена", "0-499": "0 – 500 €", "500-999": "500 – 1000 €", "1000-9999": "1000+ €", "500-9999": "500+ €"}
-        await _back_settings(query, chat_id, f"✅ Цена: {labels.get(key, key)} (за 1 человека)")
+        set_setting(chat_id, "price_ranges", new_val)
+        await query.message.edit_text(
+            PRICE_MENU_TEXT + f"\n\n✅ Сейчас: <b>{price_label(new_val)}</b>",
+            parse_mode="HTML", reply_markup=kb_price(new_val, 9999 if new_val == "any" else 0),
+        )
         return
 
     if data == "price_toggle_any":

@@ -185,6 +185,40 @@ def fmt_status(users: int, last_check: str, total: int, interval_min: int = 30) 
     )
 
 
+def price_label(ranges: str, price_max: int = 9999) -> str:
+    """Текст для выбранных диапазонов цены; соседние диапазоны склеиваются."""
+    if not ranges or ranges == "any":
+        # старые настройки: «любая» с потолком price_max
+        return "любая цена" if price_max >= 9999 else f"до {price_max} €"
+    parts = []
+    for r in ranges.split(","):
+        r = r.strip()
+        if "-" not in r:
+            continue
+        a, b = r.split("-")[:2]
+        try:
+            parts.append((int(a), int(b)))
+        except ValueError:
+            return ranges.replace(",", ", ") + " €"
+    if not parts:
+        return "любая цена"
+    parts.sort()
+    merged = [list(parts[0])]
+    for a, b in parts[1:]:
+        if a <= merged[-1][1] + 1:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    out = []
+    for a, b in merged:
+        if b >= 9999:
+            out.append(f"{a}+ €" if a > 0 else "любая цена")
+        else:
+            hi = b + 1 if b % 100 == 99 else b   # 499 -> 500, 999 -> 1000
+            out.append(f"{a} – {hi} €")
+    return ", ".join(out)
+
+
 def fmt_settings(s: dict) -> str:
     meal_labels = {
         "ai,uai": "🍽️ Все включено",
@@ -209,19 +243,7 @@ def fmt_settings(s: dict) -> str:
     else:
         interval_str = f"{interval} мин."
 
-    price_ranges = s.get("price_ranges", "any")
-    price_max = int(s.get("price_max", 9999))
-    price_labels = {
-        "0-499": "0 – 500 €", "500-999": "500 – 1000 €",
-        "1000-9999": "1000+ €", "500-9999": "500+ €",
-    }
-    if price_ranges in price_labels:
-        price_str = price_labels[price_ranges]
-    elif price_ranges == "any":
-        # старые настройки: «любая» с потолком price_max
-        price_str = "любая цена" if price_max >= 9999 else f"до {price_max} €"
-    else:
-        price_str = price_ranges.replace(",", ", ") + " €"
+    price_str = price_label(s.get("price_ranges", "any"), int(s.get("price_max", 9999)))
 
     days_val = int(s.get("days_filter", 60))
 
