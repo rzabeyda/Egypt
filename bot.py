@@ -774,6 +774,18 @@ async def run_check(app=None, notify_users=True) -> list:
 
             if not new_tours:
                 logger.info(f"Юзер {chat_id}: новых туров нет")
+                # при редких рассылках (6 ч и реже) даём знать, что бот жив
+                if interval >= 360:
+                    try:
+                        await app.bot.send_message(
+                            chat_id, "Сегодня новых туров нет" if interval >= 1440 else "Новых туров нет"
+                        )
+                    except (Forbidden, BadRequest) as e:
+                        if isinstance(e, Forbidden) or "chat not found" in str(e).lower():
+                            logger.warning(f"Юзер {chat_id} недоступен ({e}) — отключаю рассылку")
+                            remove_user(chat_id)
+                    except Exception as e:
+                        logger.error(f"Ошибка уведомления (нет туров) {chat_id}: {e}")
                 continue
 
             pending = len(new_tours)
